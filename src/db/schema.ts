@@ -95,6 +95,8 @@ export interface Product {
   stoppedOn?: string;             // ISO date if discontinued
   timeOfDay: ('am' | 'pm')[];
   notes?: string;
+  rating?: number;                // 1–5; user's overall rating of the product
+  comments?: string;              // free-form review/comments
 }
 
 export type TreatmentType =
