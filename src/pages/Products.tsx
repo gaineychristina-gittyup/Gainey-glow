@@ -124,14 +124,27 @@ export default function Products() {
           ref={scanRef}
           type="file"
           accept="image/*"
-          capture="environment"
           hidden
           onChange={(e) => handleScan(e.target.files?.[0])}
         />
+        {scanning && (
+          <div className="mt-2 rounded-lg bg-glow-50 border border-glow-200 px-3 py-2 text-xs text-glow-800 flex items-center gap-2">
+            <Loader2 size={14} className="animate-spin" />
+            Reading the photo with Gemini… this can take a few seconds.
+          </div>
+        )}
         {scanError && (
-          <p className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-            {scanError}
-          </p>
+          <div className="mt-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-800 flex items-start gap-2">
+            <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+            <div className="flex-1">{scanError}</div>
+            <button
+              type="button"
+              onClick={() => setScanError(null)}
+              className="text-red-700 font-medium hover:underline"
+            >
+              Dismiss
+            </button>
+          </div>
         )}
       </section>
 
