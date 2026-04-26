@@ -1,0 +1,77 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@layer components {
+  .card {
+    @apply bg-white/80 backdrop-blur rounded-2xl shadow-sm border border-glow-100 p-4;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 font-medium text-sm transition active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-primary {
+    @apply btn bg-glow-600 text-white hover:bg-glow-700 shadow-sm;
+  }
+  .btn-soft {
+    @apply btn bg-glow-100 text-glow-800 hover:bg-glow-200;
+  }
+  .btn-ghost {
+    @apply btn text-glow-700 hover:bg-glow-100;
+  }
+  .input {
+    @apply w-full rounded-xl border border-glow-200 bg-white/70 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-glow-400;
+  }
+  .label {
+    @apply block text-xs font-semibold uppercase tracking-wide text-glow-700 mb-1;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full bg-glow-100 text-glow-800 px-2.5 py-1 text-xs font-medium;
+  }
+  .chip-warn {
+    @apply inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2.5 py-1 text-xs font-medium;
+  }
+  .chip-danger {
+    @apply inline-flex items-center gap-1 rounded-full bg-red-100 text-red-800 px-2.5 py-1 text-xs font-medium;
+  }
+}
+
+/* Hide native input range thumb styling on slider for compare */
+input[type='range'].slider-handle {
+  -webkit-appearance: none;
+  background: transparent;
+}
+input[type='range'].slider-handle::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 9999px;
+  background: white;
+  border: 2px solid #ec4899;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  cursor: ew-resize;
+}
+input[type='range'].slider-handle::-moz-range-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 9999px;
+  background: white;
+  border: 2px solid #ec4899;
+  cursor: ew-resize;
+}
