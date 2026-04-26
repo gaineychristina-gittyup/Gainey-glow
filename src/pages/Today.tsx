@@ -2,17 +2,27 @@ import { useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Camera, Check, Sun, Moon, Upload, Trash2 } from 'lucide-react';
 import { db, FEEL_TAGS, ZONES, type FeelTag, type Product, type Zone } from '../db/schema';
-import { todayISO, fmtDate, relDays } from '../lib/date';
+import { todayISO, fmtDate, relDays, fmtDateShort } from '../lib/date';
 import { makeThumbnail } from '../lib/image';
+import { readPhotoDate } from '../lib/exif';
 import ZonePicker from '../components/ZonePicker';
 import PhotoThumb from '../components/PhotoThumb';
+
+interface UploadSummary {
+  count: number;
+  withExif: number;
+  earliest?: string;
+  latest?: string;
+}
 
 export default function Today() {
   const [zone, setZone] = useState<Zone>('full');
   const [date, setDate] = useState<string>(todayISO());
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [summary, setSummary] = useState<UploadSummary | null>(null);
+  const captureRef = useRef<HTMLInputElement>(null);
+  const uploadRef = useRef<HTMLInputElement>(null);
 
   const photosToday = useLiveQuery(
     () => db.photos.where('date').equals(date).toArray(),
@@ -46,9 +56,11 @@ export default function Today() {
     return out;
   }, [photosToday]);
 
-  async function handleFiles(files: FileList | null) {
+  // Live capture: a fresh selfie taken right now — use the selected date.
+  async function handleCapture(files: FileList | null) {
     if (!files || files.length === 0) return;
     setBusy(true);
+    setSummary(null);
     try {
       for (const file of Array.from(files)) {
         const { thumb, width, height } = await makeThumbnail(file, 480);
@@ -64,9 +76,48 @@ export default function Today() {
         });
       }
       setNotes('');
-      if (fileRef.current) fileRef.current.value = '';
+      setSummary({ count: files.length, withExif: 0, earliest: date, latest: date });
     } finally {
       setBusy(false);
+      if (captureRef.current) captureRef.current.value = '';
+    }
+  }
+
+  // Upload (existing photos): read EXIF on each file and back-date accordingly.
+  async function handleUpload(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setBusy(true);
+    setSummary(null);
+    try {
+      let withExif = 0;
+      const dates: string[] = [];
+      for (const file of Array.from(files)) {
+        const { date: detected, takenAt, source } = await readPhotoDate(file);
+        if (source === 'exif') withExif += 1;
+        const { thumb, width, height } = await makeThumbnail(file, 480);
+        await db.photos.add({
+          date: detected,
+          takenAt,
+          zone,
+          blob: file,
+          thumb,
+          width,
+          height,
+          notes: notes.trim() || undefined,
+        });
+        dates.push(detected);
+      }
+      setNotes('');
+      const sorted = [...dates].sort();
+      setSummary({
+        count: files.length,
+        withExif,
+        earliest: sorted[0],
+        latest: sorted[sorted.length - 1],
+      });
+    } finally {
+      setBusy(false);
+      if (uploadRef.current) uploadRef.current.value = '';
     }
   }
 
@@ -99,38 +150,46 @@ export default function Today() {
         <div className="mt-4 flex gap-2">
           <button
             className="btn-primary flex-1"
-            onClick={() => fileRef.current?.click()}
+            onClick={() => captureRef.current?.click()}
             disabled={busy}
           >
             <Camera size={18} /> Take photo
           </button>
           <button
             className="btn-soft flex-1"
-            onClick={() => {
-              if (fileRef.current) {
-                fileRef.current.removeAttribute('capture');
-                fileRef.current.click();
-              }
-            }}
+            onClick={() => uploadRef.current?.click()}
             disabled={busy}
           >
-            <Upload size={18} /> Upload
+            <Upload size={18} /> Upload old
           </button>
         </div>
 
         <input
-          ref={fileRef}
+          ref={captureRef}
           type="file"
           accept="image/*"
           capture="user"
           multiple
           hidden
-          onChange={(e) => handleFiles(e.target.files).then(() => {
-            if (fileRef.current) fileRef.current.setAttribute('capture', 'user');
-          })}
+          onChange={(e) => handleCapture(e.target.files)}
         />
+        <input
+          ref={uploadRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => handleUpload(e.target.files)}
+        />
+
+        {summary && (
+          <UploadSummaryNote summary={summary} onDismiss={() => setSummary(null)} />
+        )}
+
         <p className="text-[11px] text-glow-500 mt-2">
-          Photos are stored locally on this device. Nothing is uploaded.
+          Photos are stored locally on this device. Uploads read each photo's
+          capture date from its EXIF metadata so old pictures are filed under the
+          right day automatically.
         </p>
       </section>
 
@@ -189,6 +248,49 @@ export default function Today() {
           </ul>
         </section>
       )}
+    </div>
+  );
+}
+
+function UploadSummaryNote({
+  summary,
+  onDismiss,
+}: {
+  summary: UploadSummary;
+  onDismiss: () => void;
+}) {
+  const { count, withExif, earliest, latest } = summary;
+  const range =
+    earliest && latest
+      ? earliest === latest
+        ? fmtDateShort(earliest)
+        : `${fmtDateShort(earliest)} – ${fmtDateShort(latest)}`
+      : '';
+  return (
+    <div className="mt-3 rounded-xl bg-emerald-50 border border-emerald-200 p-3 flex items-start gap-2">
+      <Check size={16} className="text-emerald-700 mt-0.5" />
+      <div className="flex-1 text-xs text-emerald-900">
+        <div className="font-semibold">
+          Saved {count} photo{count === 1 ? '' : 's'}
+          {range && ` · ${range}`}
+        </div>
+        {withExif > 0 ? (
+          <div className="text-emerald-800/80">
+            Read capture date from EXIF on {withExif} of {count}.
+          </div>
+        ) : (
+          <div className="text-emerald-800/80">
+            No EXIF date found — used the file's modified date.
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="text-emerald-700 text-xs font-medium hover:underline"
+      >
+        Dismiss
+      </button>
     </div>
   );
 }
