@@ -43,9 +43,16 @@ export default function Today() {
 
   const productsToday = useLiveQuery(async () => {
     const all = await db.products.toArray();
-    return all.filter(
-      (p) => p.startedOn <= date && (!p.stoppedOn || p.stoppedOn >= date),
-    );
+    return all
+      .filter((p) => p.startedOn <= date && (!p.stoppedOn || p.stoppedOn >= date))
+      .sort((a, b) => {
+        const ao = a.sortOrder;
+        const bo = b.sortOrder;
+        if (ao !== undefined && bo !== undefined) return ao - bo;
+        if (ao !== undefined) return -1;
+        if (bo !== undefined) return 1;
+        return b.startedOn.localeCompare(a.startedOn);
+      });
   }, [date]);
 
   const treatmentsRecent = useLiveQuery(async () => {
