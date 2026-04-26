@@ -245,6 +245,8 @@ export default function Today() {
         )}
       </section>
 
+      <SkinRatingCard date={date} />
+
       <RoutineChecklist date={date} products={productsToday ?? []} />
 
       {/* recent treatments */}
@@ -381,6 +383,64 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
           onToggle={(id) => toggle(id, 'pm')}
         />
       </div>
+    </section>
+  );
+}
+
+function SkinRatingCard({ date }: { date: string }) {
+  const rating = useLiveQuery(
+    () => db.skinRatings.where('date').equals(date).first(),
+    [date],
+  );
+  const value = rating?.rating ?? 0;
+
+  async function setRating(v: number) {
+    if (rating?.id) {
+      if (v === 0) await db.skinRatings.delete(rating.id);
+      else await db.skinRatings.update(rating.id, { rating: v });
+    } else if (v > 0) {
+      await db.skinRatings.add({ date, rating: v });
+    }
+  }
+
+  const labels = ['Awful', 'Meh', 'OK', 'Good', 'Glowing'];
+  return (
+    <section className="card">
+      <h3 className="font-display text-lg text-glow-800 mb-1">Skin rating</h3>
+      <p className="text-xs text-glow-600 mb-2">
+        How does your skin look and feel today? 1 = awful, 5 = glowing.
+      </p>
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min={0}
+          max={5}
+          step={1}
+          value={value}
+          onChange={(e) => setRating(Number(e.target.value))}
+          className="flex-1 accent-pink-500"
+          aria-label="Skin rating, 0 to 5"
+        />
+        <div className="text-2xl font-display tabular-nums w-10 text-right text-glow-900">
+          {value === 0 ? '—' : value}
+        </div>
+      </div>
+      <div className="mt-1 flex justify-between text-[10px] text-glow-500 px-1 select-none">
+        {[0, 1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => setRating(n)}
+            className={`px-1 ${n === value ? 'text-glow-800 font-semibold' : ''}`}
+            aria-label={`Set rating to ${n === 0 ? 'cleared' : n}`}
+          >
+            {n === 0 ? 'clear' : n}
+          </button>
+        ))}
+      </div>
+      {value > 0 && (
+        <div className="mt-1 text-xs text-glow-700 italic">{labels[value - 1]}</div>
+      )}
     </section>
   );
 }

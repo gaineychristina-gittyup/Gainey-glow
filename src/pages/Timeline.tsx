@@ -11,6 +11,7 @@ import {
   Images,
   Plus,
   Sparkles,
+  Star,
   Trash2,
 } from 'lucide-react';
 import {
@@ -38,9 +39,10 @@ type Event =
   | { kind: 'product-start'; date: string; sortKey: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
   | { kind: 'product-stop'; date: string; sortKey: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
   | { kind: 'treatment'; date: string; sortKey: number; treatment: Treatment }
-  | { kind: 'comparison'; date: string; sortKey: number; comparison: Comparison; sinceTreatment?: SinceTreatment };
+  | { kind: 'comparison'; date: string; sortKey: number; comparison: Comparison; sinceTreatment?: SinceTreatment }
+  | { kind: 'rating'; date: string; sortKey: number; rating: number; sinceTreatment?: SinceTreatment };
 
-type Filter = 'all' | 'photos' | 'products' | 'treatments' | 'comparisons';
+type Filter = 'all' | 'photos' | 'products' | 'treatments' | 'comparisons' | 'ratings';
 
 const NEW_TREATMENT: Treatment = { type: 'facial', date: todayISO() };
 
@@ -54,6 +56,7 @@ const TYPE_STYLE: Record<
   'product-stop': { dot: 'bg-amber-500', chip: 'bg-amber-100', chipText: 'text-amber-800' },
   treatment: { dot: 'bg-violet-500', chip: 'bg-violet-100', chipText: 'text-violet-800' },
   comparison: { dot: 'bg-rose-500', chip: 'bg-rose-100', chipText: 'text-rose-800' },
+  rating: { dot: 'bg-yellow-500', chip: 'bg-yellow-100', chipText: 'text-yellow-800' },
 };
 
 export default function Timeline() {
@@ -67,18 +70,24 @@ export default function Timeline() {
   const [pickedAfter, setPickedAfter] = useState<PhotoEntry | null>(null);
   const navigate = useNavigate();
 
-  function pick(p: PhotoEntry) {
-    if (pickedBefore?.id === p.id) {
-      setPickedBefore(null);
-      return;
+  function pickAs(role: 'before' | 'after', p: PhotoEntry) {
+    if (role === 'before') {
+      // toggle off if already this photo
+      if (pickedBefore?.id === p.id) {
+        setPickedBefore(null);
+        return;
+      }
+      // if this photo is currently After, free that slot first
+      if (pickedAfter?.id === p.id) setPickedAfter(null);
+      setPickedBefore(p);
+    } else {
+      if (pickedAfter?.id === p.id) {
+        setPickedAfter(null);
+        return;
+      }
+      if (pickedBefore?.id === p.id) setPickedBefore(null);
+      setPickedAfter(p);
     }
-    if (pickedAfter?.id === p.id) {
-      setPickedAfter(null);
-      return;
-    }
-    if (!pickedBefore) setPickedBefore(p);
-    else if (!pickedAfter) setPickedAfter(p);
-    else setPickedAfter(p);
   }
 
   function goCompare() {
@@ -96,6 +105,7 @@ export default function Timeline() {
   const products = useLiveQuery(() => db.products.toArray(), []);
   const treatments = useLiveQuery(() => db.treatments.toArray(), []);
   const comparisons = useLiveQuery(() => db.comparisons.toArray(), []);
+  const ratings = useLiveQuery(() => db.skinRatings.toArray(), []);
 
   const events: Event[] = useMemo(() => {
     const out: Event[] = [];
@@ -168,8 +178,19 @@ export default function Timeline() {
       });
     });
 
+    (ratings ?? []).forEach((r) => {
+      out.push({
+        kind: 'rating',
+        date: r.date,
+        // Ratings sort above photos for the same date.
+        sortKey: dateKey(r.date) + 0.1,
+        rating: r.rating,
+        sinceTreatment: lastTreatmentBefore(r.date),
+      });
+    });
+
     return out.sort((a, b) => b.sortKey - a.sortKey);
-  }, [photos, products, treatments, comparisons]);
+  }, [photos, products, treatments, comparisons, ratings]);
 
   const filtered = useMemo(() => {
     return events.filter((e) => {
@@ -178,6 +199,7 @@ export default function Timeline() {
       if (filter === 'treatments') return e.kind === 'treatment';
       if (filter === 'products') return e.kind === 'product-start' || e.kind === 'product-stop';
       if (filter === 'comparisons') return e.kind === 'comparison';
+      if (filter === 'ratings') return e.kind === 'rating';
       return true;
     });
   }, [events, filter]);
@@ -198,6 +220,7 @@ export default function Timeline() {
     { id: 'products', label: 'Products' },
     { id: 'treatments', label: 'Treatments' },
     { id: 'comparisons', label: 'Compares' },
+    { id: 'ratings', label: 'Ratings' },
   ];
 
   return (
@@ -304,7 +327,7 @@ export default function Timeline() {
                   onPhoto={setViewing}
                   onEditTreatment={setEditingTreatment}
                   onOpenComparison={setViewingComparison}
-                  onPickPhoto={pick}
+                  onPickAs={pickAs}
                   pickedBeforeId={pickedBefore?.id}
                   pickedAfterId={pickedAfter?.id}
                 />
@@ -380,7 +403,7 @@ function TimelineCard({
   onPhoto,
   onEditTreatment,
   onOpenComparison,
-  onPickPhoto,
+  onPickAs,
   pickedBeforeId,
   pickedAfterId,
 }: {
@@ -389,7 +412,7 @@ function TimelineCard({
   onPhoto: (p: PhotoEntry) => void;
   onEditTreatment: (t: Treatment) => void;
   onOpenComparison: (c: Comparison) => void;
-  onPickPhoto: (p: PhotoEntry) => void;
+  onPickAs: (role: 'before' | 'after', p: PhotoEntry) => void;
   pickedBeforeId?: number;
   pickedAfterId?: number;
 }) {
@@ -418,7 +441,7 @@ function TimelineCard({
           onPhoto={onPhoto}
           onEditTreatment={onEditTreatment}
           onOpenComparison={onOpenComparison}
-          onPickPhoto={onPickPhoto}
+          onPickAs={onPickAs}
           pickedBeforeId={pickedBeforeId}
           pickedAfterId={pickedAfterId}
         />
@@ -441,6 +464,8 @@ function Badge({ kind }: { kind: Event['kind'] }) {
       return <span className={cls}><Sparkles size={12} /> Treatment</span>;
     case 'comparison':
       return <span className={cls}><Images size={12} /> Comparison</span>;
+    case 'rating':
+      return <span className={cls}><Star size={12} /> Skin rating</span>;
   }
 }
 
@@ -450,7 +475,7 @@ function Body({
   onPhoto,
   onEditTreatment,
   onOpenComparison,
-  onPickPhoto,
+  onPickAs,
   pickedBeforeId,
   pickedAfterId,
 }: {
@@ -459,7 +484,7 @@ function Body({
   onPhoto: (p: PhotoEntry) => void;
   onEditTreatment: (t: Treatment) => void;
   onOpenComparison: (c: Comparison) => void;
-  onPickPhoto: (p: PhotoEntry) => void;
+  onPickAs: (role: 'before' | 'after', p: PhotoEntry) => void;
   pickedBeforeId?: number;
   pickedAfterId?: number;
 }) {
@@ -496,23 +521,40 @@ function Body({
                 <span className="absolute bottom-0.5 left-0.5 rounded-full bg-white/90 text-glow-800 text-[9px] px-1.5 py-0.5 font-medium pointer-events-none">
                   {ZONES.find((z) => z.id === p.zone)?.label ?? p.zone}
                 </span>
-                <button
-                  type="button"
-                  onClick={(ev) => {
-                    ev.stopPropagation();
-                    onPickPhoto(p);
-                  }}
-                  aria-label={isB ? 'Picked as Before' : isA ? 'Picked as After' : 'Pick for compare'}
-                  className={`absolute top-0.5 right-0.5 h-5 w-5 rounded-full text-[10px] font-bold flex items-center justify-center shadow-sm ${
-                    isB
-                      ? 'bg-glow-600 text-white'
-                      : isA
-                      ? 'bg-glow-700 text-white'
-                      : 'bg-white/90 text-glow-700 hover:bg-white'
-                  }`}
-                >
-                  {isB ? 'B' : isA ? 'A' : '+'}
-                </button>
+                <div className="absolute top-0.5 right-0.5 flex gap-0.5">
+                  <button
+                    type="button"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      onPickAs('before', p);
+                    }}
+                    aria-pressed={isB}
+                    aria-label={isB ? 'Unset Before' : 'Set as Before'}
+                    className={`h-5 min-w-[20px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center shadow-sm transition ${
+                      isB
+                        ? 'bg-glow-600 text-white'
+                        : 'bg-white/90 text-glow-700 hover:bg-white'
+                    }`}
+                  >
+                    B
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      onPickAs('after', p);
+                    }}
+                    aria-pressed={isA}
+                    aria-label={isA ? 'Unset After' : 'Set as After'}
+                    className={`h-5 min-w-[20px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center shadow-sm transition ${
+                      isA
+                        ? 'bg-glow-700 text-white'
+                        : 'bg-white/90 text-glow-700 hover:bg-white'
+                    }`}
+                  >
+                    A
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -539,7 +581,36 @@ function Body({
           onOpen={onOpenComparison}
         />
       );
+    case 'rating':
+      return <RatingBody rating={event.rating} compact={compact} />;
   }
+}
+
+function RatingBody({ rating, compact }: { rating: number; compact: boolean }) {
+  const labels = ['Awful', 'Meh', 'OK', 'Good', 'Glowing'];
+  if (compact) {
+    return (
+      <div className="text-xs text-glow-700">
+        {rating}/5 · {labels[rating - 1]}
+      </div>
+    );
+  }
+  return (
+    <div className="text-sm flex items-center gap-2">
+      <div className="flex gap-0.5">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <Star
+            key={n}
+            size={16}
+            className={n <= rating ? 'text-yellow-500 fill-yellow-400' : 'text-glow-200'}
+          />
+        ))}
+      </div>
+      <span className="text-glow-700 text-xs">
+        {rating}/5 · {labels[rating - 1]}
+      </span>
+    </div>
+  );
 }
 
 function ComparisonBody({

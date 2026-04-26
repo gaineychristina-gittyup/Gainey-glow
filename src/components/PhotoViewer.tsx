@@ -1,7 +1,7 @@
 // Full-screen single-photo viewer with delete and zone-change actions.
 
 import { useEffect, useState } from 'react';
-import { Trash2, X } from 'lucide-react';
+import { Calendar, Trash2, X } from 'lucide-react';
 import { db, ZONES, type PhotoEntry, type Zone } from '../db/schema';
 import { fmtDate } from '../lib/date';
 
@@ -32,6 +32,19 @@ export default function PhotoViewer({
     }
   }
 
+  async function setDate(date: string) {
+    if (!photo.id || !date || date === photo.date) return;
+    setBusy(true);
+    try {
+      // Treat the new date as local midnight for takenAt; keeps sort stable.
+      const [y, m, d] = date.split('-').map(Number);
+      const takenAt = new Date(y, (m ?? 1) - 1, d ?? 1).getTime();
+      await db.photos.update(photo.id, { date, takenAt });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function del() {
     if (!photo.id) return;
     setBusy(true);
@@ -45,13 +58,23 @@ export default function PhotoViewer({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
-      <div className="flex items-center justify-between px-3 py-2 text-white">
-        <div className="flex flex-col">
+      <div className="flex items-center justify-between gap-2 px-3 py-2 text-white">
+        <div className="flex flex-col min-w-0">
           <span className="text-sm font-semibold">{fmtDate(photo.date)}</span>
           <span className="text-[11px] opacity-80">
             {ZONES.find((z) => z.id === photo.zone)?.label}
           </span>
         </div>
+        <label className="inline-flex items-center gap-1 bg-white/15 rounded-full px-2 py-1 text-[11px] cursor-pointer">
+          <Calendar size={12} />
+          <input
+            type="date"
+            value={photo.date}
+            onChange={(e) => setDate(e.target.value)}
+            disabled={busy}
+            className="bg-transparent border-0 text-white text-[11px] outline-none [color-scheme:dark]"
+          />
+        </label>
         <button
           onClick={onClose}
           aria-label="Close"

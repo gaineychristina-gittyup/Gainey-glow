@@ -3,10 +3,12 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { AlertTriangle, Loader2, Pencil, Plus, ScanLine, Trash2, X } from 'lucide-react';
 import {
   CONCERNS,
+  PRODUCT_CATEGORIES,
   PRODUCT_STEPS,
   db,
   type Concern,
   type Product,
+  type ProductCategory,
   type ProductStep,
 } from '../db/schema';
 import {
@@ -23,6 +25,7 @@ const blank: Product = {
   name: '',
   brand: '',
   step: 'serum',
+  category: 'topical',
   concerns: [],
   ingredients: [],
   startedOn: todayISO(),
@@ -153,15 +156,32 @@ export default function Products() {
           No products yet. Add the first item in your routine to start tracking.
         </section>
       ) : (
-        products!.map((p) => (
-          <ProductCard
-            key={p.id}
-            product={p}
-            sensitiveSet={userSensitiveSet}
-            onEdit={() => setEditing(p)}
-            onDelete={() => db.products.delete(p.id!)}
-          />
-        ))
+        PRODUCT_CATEGORIES.map((cat) => {
+          const inCategory = (products ?? []).filter(
+            (p) => (p.category ?? 'topical') === cat.id,
+          );
+          if (inCategory.length === 0) return null;
+          return (
+            <div key={cat.id} className="space-y-2">
+              <div className="px-1 text-[11px] font-semibold uppercase tracking-wide text-glow-700">
+                {cat.label}
+                <span className="text-glow-500 font-normal">
+                  {' '}
+                  · {inCategory.length}
+                </span>
+              </div>
+              {inCategory.map((p) => (
+                <ProductCard
+                  key={p.id}
+                  product={p}
+                  sensitiveSet={userSensitiveSet}
+                  onEdit={() => setEditing(p)}
+                  onDelete={() => db.products.delete(p.id!)}
+                />
+              ))}
+            </div>
+          );
+        })
       )}
 
       {editing && (
@@ -492,17 +512,30 @@ function ProductEditor({
             />
           </div>
           <div>
-            <label className="label">Step</label>
+            <label className="label">Category</label>
             <select
               className="input"
-              value={draft.step}
-              onChange={(e) => update('step', e.target.value as ProductStep)}
+              value={draft.category ?? 'topical'}
+              onChange={(e) => update('category', e.target.value as ProductCategory)}
             >
-              {PRODUCT_STEPS.map((s) => (
-                <option key={s.id} value={s.id}>{s.label}</option>
+              {PRODUCT_CATEGORIES.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
               ))}
             </select>
           </div>
+        </div>
+
+        <div>
+          <label className="label">Step</label>
+          <select
+            className="input"
+            value={draft.step}
+            onChange={(e) => update('step', e.target.value as ProductStep)}
+          >
+            {PRODUCT_STEPS.map((s) => (
+              <option key={s.id} value={s.id}>{s.label}</option>
+            ))}
+          </select>
         </div>
 
         <div className="grid grid-cols-2 gap-3">

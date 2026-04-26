@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useLocation } from 'react-router-dom';
-import { Bookmark, Check, Maximize2 } from 'lucide-react';
+import { ArrowLeftRight, Bookmark, Check, Maximize2 } from 'lucide-react';
 import {
   db,
   TREATMENT_TYPES,
@@ -171,6 +171,27 @@ export default function Compare() {
 
       {before && after && before.id !== after.id ? (
         <section className="card space-y-3">
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="btn-soft text-xs"
+              onClick={() => {
+                const b = beforeId ?? before.id;
+                const a = afterId ?? after.id;
+                setBeforeId(a);
+                setAfterId(b);
+                setSliderState((s) => ({
+                  ...s,
+                  before: s.after,
+                  after: s.before,
+                  active: s.active === 'before' ? 'after' : 'before',
+                }));
+              }}
+              aria-label="Swap Before and After"
+            >
+              <ArrowLeftRight size={14} /> Swap B↔A
+            </button>
+          </div>
           <CompareSlider
             beforeBlob={before.blob}
             afterBlob={after.blob}
@@ -280,15 +301,19 @@ export default function Compare() {
                 photo={p}
                 isBefore={(before?.id ?? -1) === p.id}
                 isAfter={(after?.id ?? -1) === p.id}
-                onPick={() => {
-                  if ((before?.id ?? -1) === p.id) {
-                    setBeforeId(undefined);
-                  } else if ((after?.id ?? -1) === p.id) {
-                    setAfterId(undefined);
-                  } else if (!beforeId) {
-                    setBeforeId(p.id);
+                onPickAs={(role) => {
+                  if (role === 'before') {
+                    if ((before?.id ?? -1) === p.id) setBeforeId(undefined);
+                    else {
+                      if ((after?.id ?? -1) === p.id) setAfterId(undefined);
+                      setBeforeId(p.id);
+                    }
                   } else {
-                    setAfterId(p.id);
+                    if ((after?.id ?? -1) === p.id) setAfterId(undefined);
+                    else {
+                      if ((before?.id ?? -1) === p.id) setBeforeId(undefined);
+                      setAfterId(p.id);
+                    }
                   }
                   setSliderState(DEFAULT_COMPARE_STATE);
                 }}
@@ -298,7 +323,7 @@ export default function Compare() {
           </div>
         )}
         <p className="text-[11px] text-glow-500 mt-2">
-          Tap a photo to set it as Before or After. Tap the corner icon to view or delete it.
+          Tap <span className="font-semibold">B</span> or <span className="font-semibold">A</span> on any photo to set it as Before or After. Tap the corner icon to open it (also lets you change its date or zone).
         </p>
       </section>
 
@@ -335,13 +360,13 @@ function SelectablePhoto({
   photo,
   isBefore,
   isAfter,
-  onPick,
+  onPickAs,
   onView,
 }: {
   photo: PhotoEntry;
   isBefore: boolean;
   isAfter: boolean;
-  onPick: () => void;
+  onPickAs: (role: 'before' | 'after') => void;
   onView: () => void;
 }) {
   return (
@@ -350,29 +375,37 @@ function SelectablePhoto({
         isBefore || isAfter ? 'border-glow-600' : 'border-transparent'
       }`}
     >
-      <button
-        type="button"
-        onClick={onPick}
-        className="absolute inset-0 block focus:outline-none"
-        aria-label={`Select photo from ${photo.date}`}
-      >
-        <PhotoThumb blob={photo.thumb} className="w-full h-full object-cover" alt={photo.date} />
-      </button>
+      <PhotoThumb blob={photo.thumb} className="w-full h-full object-cover" alt={photo.date} />
       <span className="absolute bottom-1 left-1 chip bg-white/90 text-[10px] pointer-events-none">
         {fmtDate(photo.date)}
       </span>
-      {isBefore && (
-        <span className="absolute top-1 left-1 chip bg-glow-600 text-white pointer-events-none">B</span>
-      )}
-      {isAfter && (
-        <span className="absolute bottom-1 right-1 chip bg-glow-600 text-white pointer-events-none">A</span>
-      )}
+      <div className="absolute top-1 left-1 flex gap-1">
+        <button
+          type="button"
+          onClick={() => onPickAs('before')}
+          aria-pressed={isBefore}
+          aria-label={isBefore ? 'Unset Before' : 'Set as Before'}
+          className={`h-6 min-w-[24px] rounded-full text-[11px] font-bold flex items-center justify-center shadow-sm ${
+            isBefore ? 'bg-glow-600 text-white' : 'bg-white/90 text-glow-700 hover:bg-white'
+          }`}
+        >
+          B
+        </button>
+        <button
+          type="button"
+          onClick={() => onPickAs('after')}
+          aria-pressed={isAfter}
+          aria-label={isAfter ? 'Unset After' : 'Set as After'}
+          className={`h-6 min-w-[24px] rounded-full text-[11px] font-bold flex items-center justify-center shadow-sm ${
+            isAfter ? 'bg-glow-700 text-white' : 'bg-white/90 text-glow-700 hover:bg-white'
+          }`}
+        >
+          A
+        </button>
+      </div>
       <button
         type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onView();
-        }}
+        onClick={onView}
         aria-label="Open photo"
         className="absolute top-1 right-1 bg-white/90 hover:bg-white rounded-full p-1 shadow-sm"
       >

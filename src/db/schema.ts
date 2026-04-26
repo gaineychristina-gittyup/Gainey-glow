@@ -75,11 +75,20 @@ export const PRODUCT_STEPS: { id: ProductStep; label: string }[] = [
   { id: 'exfoliant', label: 'Exfoliant' },
 ];
 
+export type ProductCategory = 'topical' | 'supplement' | 'medication';
+
+export const PRODUCT_CATEGORIES: { id: ProductCategory; label: string }[] = [
+  { id: 'topical', label: 'Topical' },
+  { id: 'supplement', label: 'Supplement' },
+  { id: 'medication', label: 'Medication' },
+];
+
 export interface Product {
   id?: number;
   name: string;
   brand?: string;
   step: ProductStep;
+  category?: ProductCategory; // defaults to 'topical' if absent (older rows)
   concerns: Concern[];
   ingredients: string[];          // free-form list (lowercased on input)
   startedOn: string;              // ISO date
@@ -203,6 +212,13 @@ export interface Comparison {
   preview: Blob;           // ~600px wide JPEG snapshot for Timeline
 }
 
+export interface SkinRating {
+  id?: number;
+  date: string;       // ISO date — unique
+  rating: number;     // 1–5
+  notes?: string;
+}
+
 class GaineyGlowDB extends Dexie {
   photos!: Table<PhotoEntry, number>;
   products!: Table<Product, number>;
@@ -212,6 +228,7 @@ class GaineyGlowDB extends Dexie {
   routineLogs!: Table<RoutineLog, number>;
   checkins!: Table<Checkin, number>;
   comparisons!: Table<Comparison, number>;
+  skinRatings!: Table<SkinRating, number>;
 
   constructor() {
     super('gainey-glow');
@@ -230,6 +247,9 @@ class GaineyGlowDB extends Dexie {
     });
     this.version(4).stores({
       comparisons: '++id, date, savedAt',
+    });
+    this.version(5).stores({
+      skinRatings: '++id, &date',
     });
   }
 }
