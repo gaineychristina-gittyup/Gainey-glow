@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useLocation } from 'react-router-dom';
 import { Camera, Check, ChevronLeft, ChevronRight, Sun, Moon, Upload } from 'lucide-react';
@@ -52,21 +52,6 @@ export default function Today() {
     const all = await db.treatments.orderBy('date').reverse().toArray();
     return all.slice(0, 3);
   }, []);
-
-  const grouped = useMemo(() => {
-    const out: Record<Zone, typeof photosToday> = {
-      full: [],
-      forehead: [],
-      leftCheek: [],
-      rightCheek: [],
-      chin: [],
-      nose: [],
-    };
-    (photosToday ?? []).forEach((p) => {
-      out[p.zone] = [...(out[p.zone] ?? []), p];
-    });
-    return out;
-  }, [photosToday]);
 
   // Live capture from the in-app camera — uses selected date and zone.
   async function handleCameraSnap(blob: Blob) {
@@ -227,30 +212,28 @@ export default function Today() {
         {(photosToday?.length ?? 0) === 0 ? (
           <p className="text-sm text-glow-600/80">No photos yet for {fmtDate(date)}.</p>
         ) : (
-          <div className="space-y-3">
-            {ZONES.map((z) =>
-              (grouped[z.id]?.length ?? 0) === 0 ? null : (
-                <div key={z.id}>
-                  <div className="text-xs font-semibold text-glow-700 mb-1.5">{z.label}</div>
-                  <div className="flex gap-1.5 overflow-x-auto -mx-1 px-1 pb-1">
-                    {grouped[z.id]!.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => setViewing(p)}
-                        className="shrink-0 h-14 w-14 sm:h-16 sm:w-16 rounded-lg overflow-hidden focus:outline-none focus:ring-2 focus:ring-glow-500"
-                      >
-                        <PhotoThumb
-                          blob={p.thumb}
-                          alt={`${z.label} on ${p.date}`}
-                          className="h-full w-full object-cover"
-                        />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ),
-            )}
+          <div className="flex gap-1.5 overflow-x-auto -mx-1 px-1 pb-1">
+            {(photosToday ?? [])
+              .slice()
+              .sort((a, b) => a.takenAt - b.takenAt)
+              .map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setViewing(p)}
+                  className="relative shrink-0 h-14 w-14 sm:h-16 sm:w-16 rounded-lg overflow-hidden focus:outline-none focus:ring-2 focus:ring-glow-500"
+                  aria-label={`${ZONES.find((z) => z.id === p.zone)?.label} photo`}
+                >
+                  <PhotoThumb
+                    blob={p.thumb}
+                    alt={`${p.zone} on ${p.date}`}
+                    className="h-full w-full object-cover"
+                  />
+                  <span className="absolute bottom-0 inset-x-0 bg-black/55 text-white text-[8px] py-0.5 text-center pointer-events-none truncate">
+                    {ZONES.find((z) => z.id === p.zone)?.label.split(' ')[0]}
+                  </span>
+                </button>
+              ))}
           </div>
         )}
       </section>

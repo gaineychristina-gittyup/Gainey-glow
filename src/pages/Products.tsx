@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useLocation } from 'react-router-dom';
-import { AlertTriangle, ChevronRight, Loader2, Pencil, Plus, ScanLine, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Loader2, Pencil, Plus, ScanLine, Star, Trash2, X } from 'lucide-react';
 import {
   CONCERNS,
   PRODUCT_CATEGORIES,
@@ -209,6 +209,7 @@ export default function Products() {
                 .map((i) => i.trim().toLowerCase())
                 .filter(Boolean),
               notes: next.notes?.trim() || undefined,
+              comments: next.comments?.trim() || undefined,
             };
             if (!cleaned.name) return;
             if (cleaned.id) {
@@ -433,6 +434,21 @@ function ProductCard({
           <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
             <span className="chip text-[10px]">{stepLabel}</span>
             <span className="text-[10px] text-glow-500">{timeLabel}</span>
+            {product.rating ? (
+              <span className="inline-flex items-center gap-0.5">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <Star
+                    key={n}
+                    size={10}
+                    className={
+                      product.rating! >= n
+                        ? 'text-yellow-500 fill-yellow-400'
+                        : 'text-glow-200'
+                    }
+                  />
+                ))}
+              </span>
+            ) : null}
             {flags.length > 0 && (
               <span className="chip-warn text-[10px]" title={`${flags.length} flagged ingredient${flags.length === 1 ? '' : 's'}`}>
                 <AlertTriangle size={10} /> {flags.length}
@@ -522,6 +538,13 @@ function ProductCard({
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {product.comments && (
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-glow-700 mb-1">Your review</div>
+              <p className="text-xs text-glow-800 whitespace-pre-wrap">{product.comments}</p>
             </div>
           )}
 
@@ -698,9 +721,59 @@ function ProductEditor({
         </div>
 
         <div>
+          <label className="label">Your rating</label>
+          <div className="flex items-center gap-2">
+            <div className="flex gap-0.5">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() =>
+                    update('rating', draft.rating === n ? undefined : n)
+                  }
+                  aria-label={`Rate ${n} of 5`}
+                  className="p-0.5"
+                >
+                  <Star
+                    size={20}
+                    className={
+                      (draft.rating ?? 0) >= n
+                        ? 'text-yellow-500 fill-yellow-400'
+                        : 'text-glow-200 hover:text-glow-400'
+                    }
+                  />
+                </button>
+              ))}
+            </div>
+            {draft.rating ? (
+              <button
+                type="button"
+                onClick={() => update('rating', undefined)}
+                className="text-[11px] text-glow-600 hover:underline"
+              >
+                Clear
+              </button>
+            ) : (
+              <span className="text-[11px] text-glow-500">Tap a star</span>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <label className="label">Comments</label>
+          <textarea
+            className="input min-h-[60px]"
+            placeholder="Your review of this product — texture, smell, results, irritation, repurchase?"
+            value={draft.comments ?? ''}
+            onChange={(e) => update('comments', e.target.value)}
+          />
+        </div>
+
+        <div>
           <label className="label">Notes</label>
           <textarea
             className="input min-h-[60px]"
+            placeholder="Any private notes (e.g. limit to PM, mix with HA serum, etc.)"
             value={draft.notes ?? ''}
             onChange={(e) => update('notes', e.target.value)}
           />
