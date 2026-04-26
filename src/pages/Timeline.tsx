@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -240,64 +240,59 @@ export default function Timeline() {
   return (
     <div className="space-y-4">
       <section className="card">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="font-display text-xl text-glow-800">Timeline</h2>
-            <p className="text-xs text-glow-600">
-              Everything that's happened to your skin, in order.
-            </p>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <h2 className="font-display text-xl text-glow-800">Timeline</h2>
+          <button
+            className="btn-primary"
+            onClick={() => setEditingTreatment({ ...NEW_TREATMENT })}
+          >
+            <Plus size={16} /> Treatment
+          </button>
+        </div>
+        <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+          <div className="inline-flex rounded-full border border-glow-200 overflow-hidden">
+            {(['list', 'calendar'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setView(m)}
+                className={`px-3 py-1.5 text-xs font-medium transition ${
+                  view === m
+                    ? 'bg-glow-600 text-white'
+                    : 'bg-white text-glow-700 hover:bg-glow-50'
+                }`}
+              >
+                {m === 'list' ? 'List' : 'Calendar'}
+              </button>
+            ))}
           </div>
-          <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+          {view === 'list' && (
+            <button
+              onClick={() => setCompact((c) => !c)}
+              className="inline-flex items-center gap-1 rounded-full border bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50 px-3 py-1.5 text-xs font-medium"
+              aria-label="Toggle compact view"
+              title={compact ? 'Expand events' : 'Compact view'}
+            >
+              {compact ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+              {compact ? 'Expanded' : 'Compact'}
+            </button>
+          )}
+          {view === 'calendar' && (
             <div className="inline-flex rounded-full border border-glow-200 overflow-hidden">
-              {(['list', 'calendar'] as const).map((m) => (
+              {([3, 6] as const).map((m) => (
                 <button
                   key={m}
-                  onClick={() => setView(m)}
+                  onClick={() => setCalendarMonths(m)}
                   className={`px-3 py-1.5 text-xs font-medium transition ${
-                    view === m
+                    calendarMonths === m
                       ? 'bg-glow-600 text-white'
                       : 'bg-white text-glow-700 hover:bg-glow-50'
                   }`}
                 >
-                  {m === 'list' ? 'List' : 'Calendar'}
+                  {m}mo
                 </button>
               ))}
             </div>
-            {view === 'list' && (
-              <button
-                onClick={() => setCompact((c) => !c)}
-                className="inline-flex items-center gap-1 rounded-full border bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50 px-3 py-1.5 text-xs font-medium"
-                aria-label="Toggle compact view"
-                title={compact ? 'Expand events' : 'Compact view'}
-              >
-                {compact ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
-                {compact ? 'Expanded' : 'Compact'}
-              </button>
-            )}
-            {view === 'calendar' && (
-              <div className="inline-flex rounded-full border border-glow-200 overflow-hidden">
-                {([3, 6] as const).map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => setCalendarMonths(m)}
-                    className={`px-3 py-1.5 text-xs font-medium transition ${
-                      calendarMonths === m
-                        ? 'bg-glow-600 text-white'
-                        : 'bg-white text-glow-700 hover:bg-glow-50'
-                    }`}
-                  >
-                    {m}mo
-                  </button>
-                ))}
-              </div>
-            )}
-            <button
-              className="btn-primary"
-              onClick={() => setEditingTreatment({ ...NEW_TREATMENT })}
-            >
-              <Plus size={16} /> Treatment
-            </button>
-          </div>
+          )}
         </div>
 
         <div className="mt-3 -mx-1 px-1 flex gap-1.5 overflow-x-auto pb-1">
@@ -391,7 +386,7 @@ export default function Timeline() {
                     {showYear && <YearDivider year={year} />}
                     <li className="relative pl-8">
                       <span
-                        className={`absolute left-[10px] top-4 w-2.5 h-2.5 rounded-full ring-2 ring-rose-50 ${TYPE_STYLE[e.kind].dot}`}
+                        className={`absolute left-[10px] top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full ring-2 ring-rose-50 ${TYPE_STYLE[e.kind].dot}`}
                         aria-hidden
                       />
                       <TimelineCard
@@ -616,19 +611,12 @@ function Body({
                   picked ? 'border-glow-600' : 'border-transparent'
                 }`}
               >
-                <button
-                  type="button"
-                  onClick={() => onPickPhoto(p)}
-                  onDoubleClick={() => onPhoto(p)}
-                  className="absolute inset-0 block focus:outline-none"
-                  aria-label={
-                    picked
-                      ? 'Unpick photo'
-                      : 'Pick photo for compare (double-tap to open)'
-                  }
-                >
-                  <PhotoThumb blob={p.thumb} className="w-full h-full object-cover" />
-                </button>
+                <PhotoTimelineButton
+                  photo={p}
+                  picked={picked}
+                  onTap={() => onPhoto(p)}
+                  onLongPress={() => onPickPhoto(p)}
+                />
                 <span className="absolute bottom-0.5 left-0.5 rounded-full bg-white/90 text-glow-800 text-[9px] px-1.5 py-0.5 font-medium pointer-events-none">
                   {ZONES.find((z) => z.id === p.zone)?.label ?? p.zone}
                 </span>
@@ -1050,6 +1038,79 @@ function PreTreatmentGuidanceModal({
         </div>
       </div>
     </div>
+  );
+}
+
+function PhotoTimelineButton({
+  photo,
+  picked,
+  onTap,
+  onLongPress,
+}: {
+  photo: PhotoEntry;
+  picked: boolean;
+  onTap: () => void;
+  onLongPress: () => void;
+}) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longFiredRef = useRef(false);
+  const startRef = useRef<{ x: number; y: number } | null>(null);
+
+  function clear() {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }
+
+  function onPointerDown(e: React.PointerEvent) {
+    longFiredRef.current = false;
+    startRef.current = { x: e.clientX, y: e.clientY };
+    clear();
+    timerRef.current = setTimeout(() => {
+      longFiredRef.current = true;
+      onLongPress();
+      // tiny haptic on supporting devices
+      if ('vibrate' in navigator) {
+        try { navigator.vibrate?.(10); } catch { /* ignore */ }
+      }
+    }, 450);
+  }
+
+  function onPointerMove(e: React.PointerEvent) {
+    if (!startRef.current) return;
+    const dx = e.clientX - startRef.current.x;
+    const dy = e.clientY - startRef.current.y;
+    if (Math.hypot(dx, dy) > 8) clear();
+  }
+
+  function onPointerUp() {
+    if (timerRef.current && !longFiredRef.current) {
+      clear();
+      onTap();
+    } else {
+      clear();
+    }
+  }
+
+  function onPointerCancel() {
+    clear();
+  }
+
+  return (
+    <button
+      type="button"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onPointerLeave={onPointerCancel}
+      onContextMenu={(e) => e.preventDefault()}
+      className="absolute inset-0 block focus:outline-none touch-none"
+      aria-label={picked ? 'Picked for compare' : 'Open photo (long-press to pick for compare)'}
+    >
+      <PhotoThumb blob={photo.thumb} className="w-full h-full object-cover" />
+    </button>
   );
 }
 
