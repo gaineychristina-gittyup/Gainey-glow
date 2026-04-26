@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Minus, Plus, RotateCcw } from 'lucide-react';
+import { ArrowLeftRight, Minus, Plus, RotateCcw } from 'lucide-react';
 
 export interface ImageTransform {
   zoom: number;
@@ -51,7 +51,11 @@ export default function CompareSlider({
   const [after, setAfter] = useState<string>();
   const [internal, setInternal] = useState<CompareSliderState>(DEFAULT_COMPARE_STATE);
   const containerRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number; side: 'before' | 'after' } | null>(null);
+  const dragRef = useRef<
+    | { mode: 'pan'; startX: number; startY: number; panX: number; panY: number; side: 'before' | 'after' }
+    | { mode: 'slide'; startX: number; startPos: number }
+    | null
+  >(null);
   const pinchRef = useRef<{ d0: number; zoom: number; side: 'before' | 'after' } | null>(null);
 
   const s = state ?? internal;
@@ -103,12 +107,20 @@ export default function CompareSlider({
 
   function onPointerDown(e: React.PointerEvent) {
     const target = e.target as HTMLElement;
-    if (target.closest('input[type="range"]') || target.closest('button')) return;
+    if (target.closest('button[data-role="ui"]')) return;
+    const isHandle = !!target.closest('[data-role="slider-handle"]');
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+
+    if (isHandle) {
+      dragRef.current = { mode: 'slide', startX: e.clientX, startPos: s.pos };
+      return;
+    }
+
     const side = sideFromX(e.clientX);
     if (side !== s.active) setActive(side);
     if (s[side].zoom <= 1) return;
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     dragRef.current = {
+      mode: 'pan',
       startX: e.clientX,
       startY: e.clientY,
       panX: s[side].panX,
@@ -120,6 +132,15 @@ export default function CompareSlider({
   function onPointerMove(e: React.PointerEvent) {
     const d = dragRef.current;
     if (!d) return;
+    if (d.mode === 'slide') {
+      const el = containerRef.current;
+      if (!el) return;
+      const w = el.clientWidth;
+      const dx = e.clientX - d.startX;
+      const next = Math.max(0, Math.min(100, d.startPos + (dx / w) * 100));
+      setPos(next);
+      return;
+    }
     const dx = e.clientX - d.startX;
     const dy = e.clientY - d.startY;
     const t = s[d.side];
@@ -221,15 +242,24 @@ export default function CompareSlider({
           className="absolute top-0 bottom-0 w-px bg-white/90 shadow-[0_0_8px_rgba(0,0,0,0.4)] pointer-events-none"
           style={{ left: `${s.pos}%` }}
         />
-        <input
-          type="range"
-          min={0}
-          max={100}
-          value={s.pos}
-          onChange={(e) => setPos(Number(e.target.value))}
-          className="slider-handle absolute inset-0 w-full h-full cursor-ew-resize"
-          aria-label="Compare slider"
-        />
+        {/* Draggable handle on the divider; pan still works on the rest of the image. */}
+        <div
+          data-role="slider-handle"
+          role="slider"
+          aria-label="Compare position"
+          aria-valuenow={Math.round(s.pos)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowLeft') setPos(Math.max(0, s.pos - 2));
+            if (e.key === 'ArrowRight') setPos(Math.min(100, s.pos + 2));
+          }}
+          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-10 w-10 rounded-full bg-white/95 shadow-lg flex items-center justify-center cursor-ew-resize border-2 border-glow-600 touch-none"
+          style={{ left: `${s.pos}%` }}
+        >
+          <ArrowLeftRight size={16} className="text-glow-700 pointer-events-none" />
+        </div>
         {beforeLabel && (
           <span
             className={`absolute top-2 left-2 chip pointer-events-none ${

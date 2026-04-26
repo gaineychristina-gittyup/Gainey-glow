@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { useNavigate } from 'react-router-dom';
 import {
   CalendarClock,
   Camera,
@@ -43,6 +44,18 @@ type Filter = 'all' | 'photos' | 'products' | 'treatments' | 'comparisons';
 
 const NEW_TREATMENT: Treatment = { type: 'facial', date: todayISO() };
 
+// Per-type colors for badges and timeline dots.
+const TYPE_STYLE: Record<
+  Event['kind'],
+  { dot: string; chip: string; chipText: string }
+> = {
+  photo: { dot: 'bg-sky-500', chip: 'bg-sky-100', chipText: 'text-sky-800' },
+  'product-start': { dot: 'bg-emerald-500', chip: 'bg-emerald-100', chipText: 'text-emerald-800' },
+  'product-stop': { dot: 'bg-amber-500', chip: 'bg-amber-100', chipText: 'text-amber-800' },
+  treatment: { dot: 'bg-violet-500', chip: 'bg-violet-100', chipText: 'text-violet-800' },
+  comparison: { dot: 'bg-rose-500', chip: 'bg-rose-100', chipText: 'text-rose-800' },
+};
+
 export default function Timeline() {
   const [viewing, setViewing] = useState<PhotoEntry | null>(null);
   const [editingTreatment, setEditingTreatment] = useState<Treatment | null>(null);
@@ -50,6 +63,35 @@ export default function Timeline() {
   const [compact, setCompact] = useState(false);
 
   const [viewingComparison, setViewingComparison] = useState<Comparison | null>(null);
+  const [pickedBefore, setPickedBefore] = useState<PhotoEntry | null>(null);
+  const [pickedAfter, setPickedAfter] = useState<PhotoEntry | null>(null);
+  const navigate = useNavigate();
+
+  function pick(p: PhotoEntry) {
+    if (pickedBefore?.id === p.id) {
+      setPickedBefore(null);
+      return;
+    }
+    if (pickedAfter?.id === p.id) {
+      setPickedAfter(null);
+      return;
+    }
+    if (!pickedBefore) setPickedBefore(p);
+    else if (!pickedAfter) setPickedAfter(p);
+    else setPickedAfter(p);
+  }
+
+  function goCompare() {
+    if (!pickedBefore || !pickedAfter) return;
+    navigate('/compare', {
+      state: {
+        zone: pickedBefore.zone,
+        beforeId: pickedBefore.id,
+        afterId: pickedAfter.id,
+      },
+    });
+  }
+
   const photos = useLiveQuery(() => db.photos.toArray(), []);
   const products = useLiveQuery(() => db.products.toArray(), []);
   const treatments = useLiveQuery(() => db.treatments.toArray(), []);
@@ -253,7 +295,7 @@ export default function Timeline() {
             {filtered.map((e, i) => (
               <li key={`${e.kind}-${e.date}-${i}`} className="relative pl-8">
                 <span
-                  className="absolute left-[10px] top-4 w-2.5 h-2.5 rounded-full bg-glow-500 ring-2 ring-rose-50"
+                  className={`absolute left-[10px] top-4 w-2.5 h-2.5 rounded-full ring-2 ring-rose-50 ${TYPE_STYLE[e.kind].dot}`}
                   aria-hidden
                 />
                 <TimelineCard
@@ -262,6 +304,9 @@ export default function Timeline() {
                   onPhoto={setViewing}
                   onEditTreatment={setEditingTreatment}
                   onOpenComparison={setViewingComparison}
+                  onPickPhoto={pick}
+                  pickedBeforeId={pickedBefore?.id}
+                  pickedAfterId={pickedAfter?.id}
                 />
               </li>
             ))}
@@ -275,6 +320,37 @@ export default function Timeline() {
           comparison={viewingComparison}
           onClose={() => setViewingComparison(null)}
         />
+      )}
+
+      {(pickedBefore || pickedAfter) && (
+        <div className="fixed left-0 right-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 flex justify-center px-4 pointer-events-none">
+          <div className="pointer-events-auto card flex items-center gap-3 max-w-md w-full shadow-xl">
+            <div className="text-xs text-glow-700 flex-1 min-w-0">
+              <div className="font-semibold">Compare picks</div>
+              <div className="truncate">
+                {pickedBefore ? `B: ${fmtDate(pickedBefore.date)}` : 'B: —'}
+                {' · '}
+                {pickedAfter ? `A: ${fmtDate(pickedAfter.date)}` : 'A: —'}
+              </div>
+            </div>
+            <button
+              className="btn-ghost text-xs"
+              onClick={() => {
+                setPickedBefore(null);
+                setPickedAfter(null);
+              }}
+            >
+              Clear
+            </button>
+            <button
+              className="btn-primary"
+              disabled={!pickedBefore || !pickedAfter}
+              onClick={goCompare}
+            >
+              Compare →
+            </button>
+          </div>
+        </div>
       )}
 
       {editingTreatment && (
@@ -304,12 +380,18 @@ function TimelineCard({
   onPhoto,
   onEditTreatment,
   onOpenComparison,
+  onPickPhoto,
+  pickedBeforeId,
+  pickedAfterId,
 }: {
   event: Event;
   compact: boolean;
   onPhoto: (p: PhotoEntry) => void;
   onEditTreatment: (t: Treatment) => void;
   onOpenComparison: (c: Comparison) => void;
+  onPickPhoto: (p: PhotoEntry) => void;
+  pickedBeforeId?: number;
+  pickedAfterId?: number;
 }) {
   const since = event.kind === 'treatment' ? undefined : event.sinceTreatment;
   return (
@@ -336,6 +418,9 @@ function TimelineCard({
           onPhoto={onPhoto}
           onEditTreatment={onEditTreatment}
           onOpenComparison={onOpenComparison}
+          onPickPhoto={onPickPhoto}
+          pickedBeforeId={pickedBeforeId}
+          pickedAfterId={pickedAfterId}
         />
       </div>
     </div>
@@ -343,37 +428,19 @@ function TimelineCard({
 }
 
 function Badge({ kind }: { kind: Event['kind'] }) {
+  const style = TYPE_STYLE[kind];
+  const cls = `inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${style.chip} ${style.chipText}`;
   switch (kind) {
     case 'photo':
-      return (
-        <span className="chip">
-          <Camera size={12} /> Photo
-        </span>
-      );
+      return <span className={cls}><Camera size={12} /> Photo</span>;
     case 'product-start':
-      return (
-        <span className="chip">
-          <FlaskConical size={12} /> Product started
-        </span>
-      );
+      return <span className={cls}><FlaskConical size={12} /> Product started</span>;
     case 'product-stop':
-      return (
-        <span className="chip-warn">
-          <CircleStop size={12} /> Product stopped
-        </span>
-      );
+      return <span className={cls}><CircleStop size={12} /> Product stopped</span>;
     case 'treatment':
-      return (
-        <span className="chip" style={{ background: '#fce7f3' }}>
-          <Sparkles size={12} /> Treatment
-        </span>
-      );
+      return <span className={cls}><Sparkles size={12} /> Treatment</span>;
     case 'comparison':
-      return (
-        <span className="chip">
-          <Images size={12} /> Comparison
-        </span>
-      );
+      return <span className={cls}><Images size={12} /> Comparison</span>;
   }
 }
 
@@ -383,12 +450,18 @@ function Body({
   onPhoto,
   onEditTreatment,
   onOpenComparison,
+  onPickPhoto,
+  pickedBeforeId,
+  pickedAfterId,
 }: {
   event: Event;
   compact: boolean;
   onPhoto: (p: PhotoEntry) => void;
   onEditTreatment: (t: Treatment) => void;
   onOpenComparison: (c: Comparison) => void;
+  onPickPhoto: (p: PhotoEntry) => void;
+  pickedBeforeId?: number;
+  pickedAfterId?: number;
 }) {
   switch (event.kind) {
     case 'photo':
@@ -402,19 +475,47 @@ function Body({
       }
       return (
         <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5">
-          {event.photos.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => onPhoto(p)}
-              className="relative block focus:outline-none focus:ring-2 focus:ring-glow-500 rounded-lg"
-            >
-              <PhotoThumb blob={p.thumb} className="aspect-square w-full object-cover rounded-lg" />
-              <span className="absolute bottom-0.5 left-0.5 rounded-full bg-white/90 text-glow-800 text-[9px] px-1.5 py-0.5 font-medium">
-                {ZONES.find((z) => z.id === p.zone)?.label ?? p.zone}
-              </span>
-            </button>
-          ))}
+          {event.photos.map((p) => {
+            const isB = pickedBeforeId === p.id;
+            const isA = pickedAfterId === p.id;
+            return (
+              <div
+                key={p.id}
+                className={`relative aspect-square rounded-lg overflow-hidden border-2 ${
+                  isB || isA ? 'border-glow-600' : 'border-transparent'
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => onPhoto(p)}
+                  className="absolute inset-0 block focus:outline-none"
+                  aria-label={`Open photo from ${p.date}`}
+                >
+                  <PhotoThumb blob={p.thumb} className="w-full h-full object-cover" />
+                </button>
+                <span className="absolute bottom-0.5 left-0.5 rounded-full bg-white/90 text-glow-800 text-[9px] px-1.5 py-0.5 font-medium pointer-events-none">
+                  {ZONES.find((z) => z.id === p.zone)?.label ?? p.zone}
+                </span>
+                <button
+                  type="button"
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    onPickPhoto(p);
+                  }}
+                  aria-label={isB ? 'Picked as Before' : isA ? 'Picked as After' : 'Pick for compare'}
+                  className={`absolute top-0.5 right-0.5 h-5 w-5 rounded-full text-[10px] font-bold flex items-center justify-center shadow-sm ${
+                    isB
+                      ? 'bg-glow-600 text-white'
+                      : isA
+                      ? 'bg-glow-700 text-white'
+                      : 'bg-white/90 text-glow-700 hover:bg-white'
+                  }`}
+                >
+                  {isB ? 'B' : isA ? 'A' : '+'}
+                </button>
+              </div>
+            );
+          })}
         </div>
       );
     case 'product-start':
