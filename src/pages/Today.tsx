@@ -4,9 +4,10 @@ import { Camera, Check, Sun, Moon, Upload, Trash2 } from 'lucide-react';
 import { db, FEEL_TAGS, ZONES, type FeelTag, type Product, type Zone } from '../db/schema';
 import { todayISO, fmtDate, relDays, fmtDateShort } from '../lib/date';
 import { makeThumbnail } from '../lib/image';
-import { readPhotoDate } from '../lib/exif';
 import ZonePicker from '../components/ZonePicker';
 import PhotoThumb from '../components/PhotoThumb';
+import CameraCapture from '../components/CameraCapture';
+import UploadReviewModal from '../components/UploadReviewModal';
 
 interface UploadSummary {
   count: number;
@@ -21,7 +22,8 @@ export default function Today() {
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<UploadSummary | null>(null);
-  const captureRef = useRef<HTMLInputElement>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [reviewFiles, setReviewFiles] = useState<File[] | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
 
   const photosToday = useLiveQuery(
@@ -56,69 +58,37 @@ export default function Today() {
     return out;
   }, [photosToday]);
 
-  // Live capture: a fresh selfie taken right now — use the selected date.
-  async function handleCapture(files: FileList | null) {
-    if (!files || files.length === 0) return;
+  // Live capture from the in-app camera — uses selected date and zone.
+  async function handleCameraSnap(blob: Blob) {
     setBusy(true);
     setSummary(null);
     try {
-      for (const file of Array.from(files)) {
-        const { thumb, width, height } = await makeThumbnail(file, 480);
-        await db.photos.add({
-          date,
-          takenAt: Date.now(),
-          zone,
-          blob: file,
-          thumb,
-          width,
-          height,
-          notes: notes.trim() || undefined,
-        });
-      }
+      const { thumb, width, height } = await makeThumbnail(blob, 480);
+      await db.photos.add({
+        date,
+        takenAt: Date.now(),
+        zone,
+        blob,
+        thumb,
+        width,
+        height,
+        notes: notes.trim() || undefined,
+      });
       setNotes('');
-      setSummary({ count: files.length, withExif: 0, earliest: date, latest: date });
+      setSummary({ count: 1, withExif: 0, earliest: date, latest: date });
     } finally {
       setBusy(false);
-      if (captureRef.current) captureRef.current.value = '';
+      setCameraOpen(false);
     }
   }
 
-  // Upload (existing photos): read EXIF on each file and back-date accordingly.
-  async function handleUpload(files: FileList | null) {
+  // Upload existing photos — open the review modal where the user can
+  // assign per-photo zones (optionally with Gemini auto-detect).
+  function handleUpload(files: FileList | null) {
     if (!files || files.length === 0) return;
-    setBusy(true);
     setSummary(null);
-    try {
-      let withExif = 0;
-      const dates: string[] = [];
-      for (const file of Array.from(files)) {
-        const { date: detected, takenAt, source } = await readPhotoDate(file);
-        if (source === 'exif') withExif += 1;
-        const { thumb, width, height } = await makeThumbnail(file, 480);
-        await db.photos.add({
-          date: detected,
-          takenAt,
-          zone,
-          blob: file,
-          thumb,
-          width,
-          height,
-          notes: notes.trim() || undefined,
-        });
-        dates.push(detected);
-      }
-      setNotes('');
-      const sorted = [...dates].sort();
-      setSummary({
-        count: files.length,
-        withExif,
-        earliest: sorted[0],
-        latest: sorted[sorted.length - 1],
-      });
-    } finally {
-      setBusy(false);
-      if (uploadRef.current) uploadRef.current.value = '';
-    }
+    setReviewFiles(Array.from(files));
+    if (uploadRef.current) uploadRef.current.value = '';
   }
 
   return (
@@ -150,7 +120,7 @@ export default function Today() {
         <div className="mt-4 flex gap-2">
           <button
             className="btn-primary flex-1"
-            onClick={() => captureRef.current?.click()}
+            onClick={() => setCameraOpen(true)}
             disabled={busy}
           >
             <Camera size={18} /> Take photo
@@ -165,15 +135,6 @@ export default function Today() {
         </div>
 
         <input
-          ref={captureRef}
-          type="file"
-          accept="image/*"
-          capture="user"
-          multiple
-          hidden
-          onChange={(e) => handleCapture(e.target.files)}
-        />
-        <input
           ref={uploadRef}
           type="file"
           accept="image/*"
@@ -187,11 +148,33 @@ export default function Today() {
         )}
 
         <p className="text-[11px] text-glow-500 mt-2">
-          Photos are stored locally on this device. Uploads read each photo's
-          capture date from its EXIF metadata so old pictures are filed under the
-          right day automatically.
+          Photos are stored locally on this device. The in-app camera shows a
+          rule-of-thirds grid and a face-zone outline so framing stays consistent
+          day to day. Uploads read each photo's capture date from its EXIF
+          metadata.
         </p>
       </section>
+
+      {cameraOpen && (
+        <CameraCapture
+          zone={zone}
+          onZoneChange={setZone}
+          onCapture={handleCameraSnap}
+          onClose={() => setCameraOpen(false)}
+        />
+      )}
+
+      {reviewFiles && (
+        <UploadReviewModal
+          files={reviewFiles}
+          defaultZone={zone}
+          onClose={() => setReviewFiles(null)}
+          onSaved={(s) => {
+            setReviewFiles(null);
+            setSummary(s);
+          }}
+        />
+      )}
 
       <FeelTagsSection date={date} />
 
