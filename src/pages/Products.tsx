@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { useLocation } from 'react-router-dom';
 import { AlertTriangle, Loader2, Pencil, Plus, ScanLine, Trash2, X } from 'lucide-react';
 import {
   CONCERNS,
@@ -34,6 +35,7 @@ const blank: Product = {
 };
 
 export default function Products() {
+  const location = useLocation();
   const [editing, setEditing] = useState<Product | null>(null);
   const [showSensitivity, setShowSensitivity] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -46,6 +48,16 @@ export default function Products() {
     [],
   );
   const sensitivities = useLiveQuery(() => db.sensitivities.toArray(), []);
+
+  // If we navigated here with state.editProductId, open that product's editor
+  // once the products query has loaded.
+  useEffect(() => {
+    const wantId = (location.state as { editProductId?: number } | null)?.editProductId;
+    if (wantId == null || !products) return;
+    const found = products.find((p) => p.id === wantId);
+    if (found) setEditing(found);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key, products]);
 
   async function handleScan(file: File | undefined) {
     if (!file) return;

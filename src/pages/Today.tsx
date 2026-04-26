@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { useLocation } from 'react-router-dom';
 import { Camera, Check, ChevronLeft, ChevronRight, Sun, Moon, Upload } from 'lucide-react';
 import { db, ZONES, type PhotoEntry, type Product, type Zone } from '../db/schema';
 import { todayISO, fmtDate, relDays, fmtDateShort, shiftDate } from '../lib/date';
@@ -19,7 +20,14 @@ interface UploadSummary {
 
 export default function Today() {
   const [zone, setZone] = useState<Zone>('full');
-  const [date, setDate] = useState<string>(todayISO());
+  const location = useLocation();
+  const seedDate = (location.state as { date?: string } | null)?.date;
+  const [date, setDate] = useState<string>(seedDate ?? todayISO());
+  useEffect(() => {
+    const d = (location.state as { date?: string } | null)?.date;
+    if (d) setDate(d);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<UploadSummary | null>(null);
@@ -224,18 +232,18 @@ export default function Today() {
               (grouped[z.id]?.length ?? 0) === 0 ? null : (
                 <div key={z.id}>
                   <div className="text-xs font-semibold text-glow-700 mb-1.5">{z.label}</div>
-                  <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5">
+                  <div className="flex gap-1.5 overflow-x-auto -mx-1 px-1 pb-1">
                     {grouped[z.id]!.map((p) => (
                       <button
                         key={p.id}
                         type="button"
                         onClick={() => setViewing(p)}
-                        className="relative block focus:outline-none focus:ring-2 focus:ring-glow-500 rounded-lg"
+                        className="shrink-0 h-14 w-14 sm:h-16 sm:w-16 rounded-lg overflow-hidden focus:outline-none focus:ring-2 focus:ring-glow-500"
                       >
                         <PhotoThumb
                           blob={p.thumb}
                           alt={`${z.label} on ${p.date}`}
-                          className="aspect-square w-full object-cover rounded-lg"
+                          className="h-full w-full object-cover"
                         />
                       </button>
                     ))}

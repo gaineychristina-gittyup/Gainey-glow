@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -36,8 +36,8 @@ interface SinceTreatment {
 
 type Event =
   | { kind: 'photo'; date: string; sortKey: number; photos: PhotoEntry[]; sinceTreatment?: SinceTreatment }
-  | { kind: 'product-start'; date: string; sortKey: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
-  | { kind: 'product-stop'; date: string; sortKey: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
+  | { kind: 'product-start'; date: string; sortKey: number; productId?: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
+  | { kind: 'product-stop'; date: string; sortKey: number; productId?: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
   | { kind: 'treatment'; date: string; sortKey: number; treatment: Treatment }
   | { kind: 'comparison'; date: string; sortKey: number; comparison: Comparison; sinceTreatment?: SinceTreatment }
   | { kind: 'rating'; date: string; sortKey: number; rating: number; notes?: string; sinceTreatment?: SinceTreatment };
@@ -66,37 +66,38 @@ export default function Timeline() {
   const [compact, setCompact] = useState(false);
 
   const [viewingComparison, setViewingComparison] = useState<Comparison | null>(null);
-  const [pickedBefore, setPickedBefore] = useState<PhotoEntry | null>(null);
-  const [pickedAfter, setPickedAfter] = useState<PhotoEntry | null>(null);
+  const [picked, setPicked] = useState<PhotoEntry[]>([]);
+  const [view, setView] = useState<'list' | 'calendar'>('list');
+  const [calendarMonths, setCalendarMonths] = useState<3 | 6>(3);
+  const [openDate, setOpenDate] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  function pickAs(role: 'before' | 'after', p: PhotoEntry) {
-    if (role === 'before') {
-      // toggle off if already this photo
-      if (pickedBefore?.id === p.id) {
-        setPickedBefore(null);
-        return;
-      }
-      // if this photo is currently After, free that slot first
-      if (pickedAfter?.id === p.id) setPickedAfter(null);
-      setPickedBefore(p);
-    } else {
-      if (pickedAfter?.id === p.id) {
-        setPickedAfter(null);
-        return;
-      }
-      if (pickedBefore?.id === p.id) setPickedBefore(null);
-      setPickedAfter(p);
-    }
+  function togglePick(p: PhotoEntry) {
+    setPicked((cur) => {
+      const idx = cur.findIndex((x) => x.id === p.id);
+      if (idx >= 0) return cur.filter((_, i) => i !== idx);
+      if (cur.length < 2) return [...cur, p];
+      // 2 already picked — replace the older one so the new pick wins
+      const sorted = [...cur].sort((a, b) => a.date.localeCompare(b.date));
+      return [sorted[1], p];
+    });
   }
 
+  // Auto-derive Before (older) and After (newer) from the two picks.
+  const orderedPicks = useMemo(() => {
+    const sorted = [...picked].sort(
+      (a, b) => a.date.localeCompare(b.date) || a.takenAt - b.takenAt,
+    );
+    return { before: sorted[0], after: sorted[1] };
+  }, [picked]);
+
   function goCompare() {
-    if (!pickedBefore || !pickedAfter) return;
+    if (!orderedPicks.before || !orderedPicks.after) return;
     navigate('/compare', {
       state: {
-        zone: pickedBefore.zone,
-        beforeId: pickedBefore.id,
-        afterId: pickedAfter.id,
+        zone: orderedPicks.before.zone,
+        beforeId: orderedPicks.before.id,
+        afterId: orderedPicks.after.id,
       },
     });
   }
@@ -144,6 +145,7 @@ export default function Timeline() {
         kind: 'product-start',
         date: p.startedOn,
         sortKey: dateKey(p.startedOn) - 0.1,
+        productId: p.id,
         product: { name: p.name, brand: p.brand, step: p.step },
         sinceTreatment: lastTreatmentBefore(p.startedOn),
       });
@@ -152,6 +154,7 @@ export default function Timeline() {
           kind: 'product-stop',
           date: p.stoppedOn,
           sortKey: dateKey(p.stoppedOn) - 0.05,
+          productId: p.id,
           product: { name: p.name, brand: p.brand, step: p.step },
           sinceTreatment: lastTreatmentBefore(p.stoppedOn),
         });
@@ -234,16 +237,50 @@ export default function Timeline() {
               Everything that's happened to your skin, in order.
             </p>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => setCompact((c) => !c)}
-              className="inline-flex items-center gap-1 rounded-full border bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50 px-3 py-1.5 text-xs font-medium"
-              aria-label="Toggle compact view"
-              title={compact ? 'Expand events' : 'Compact view'}
-            >
-              {compact ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
-              {compact ? 'Expanded' : 'Compact'}
-            </button>
+          <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+            <div className="inline-flex rounded-full border border-glow-200 overflow-hidden">
+              {(['list', 'calendar'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setView(m)}
+                  className={`px-3 py-1.5 text-xs font-medium transition ${
+                    view === m
+                      ? 'bg-glow-600 text-white'
+                      : 'bg-white text-glow-700 hover:bg-glow-50'
+                  }`}
+                >
+                  {m === 'list' ? 'List' : 'Calendar'}
+                </button>
+              ))}
+            </div>
+            {view === 'list' && (
+              <button
+                onClick={() => setCompact((c) => !c)}
+                className="inline-flex items-center gap-1 rounded-full border bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50 px-3 py-1.5 text-xs font-medium"
+                aria-label="Toggle compact view"
+                title={compact ? 'Expand events' : 'Compact view'}
+              >
+                {compact ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+                {compact ? 'Expanded' : 'Compact'}
+              </button>
+            )}
+            {view === 'calendar' && (
+              <div className="inline-flex rounded-full border border-glow-200 overflow-hidden">
+                {([3, 6] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setCalendarMonths(m)}
+                    className={`px-3 py-1.5 text-xs font-medium transition ${
+                      calendarMonths === m
+                        ? 'bg-glow-600 text-white'
+                        : 'bg-white text-glow-700 hover:bg-glow-50'
+                    }`}
+                  >
+                    {m}mo
+                  </button>
+                ))}
+              </div>
+            )}
             <button
               className="btn-primary"
               onClick={() => setEditingTreatment({ ...NEW_TREATMENT })}
@@ -305,7 +342,17 @@ export default function Timeline() {
         </section>
       )}
 
-      {filtered.length === 0 ? (
+      {view === 'calendar' ? (
+        <CalendarView
+          months={calendarMonths}
+          events={filtered}
+          onPhoto={setViewing}
+          onOpenComparison={setViewingComparison}
+          onEditTreatment={setEditingTreatment}
+          onEditProduct={(pid) => navigate('/products', { state: { editProductId: pid } })}
+          onEditRating={(d) => navigate('/', { state: { date: d } })}
+        />
+      ) : filtered.length === 0 ? (
         <div className="card text-sm text-glow-600/80">
           {events.length === 0
             ? "Your timeline will fill in as you log photos, products, and treatments."
@@ -316,24 +363,35 @@ export default function Timeline() {
         <div className="relative">
           <div className="absolute left-[14px] top-2 bottom-2 w-px bg-glow-200" />
           <ul className={compact ? 'space-y-2' : 'space-y-4'}>
-            {filtered.map((e, i) => (
-              <li key={`${e.kind}-${e.date}-${i}`} className="relative pl-8">
-                <span
-                  className={`absolute left-[10px] top-4 w-2.5 h-2.5 rounded-full ring-2 ring-rose-50 ${TYPE_STYLE[e.kind].dot}`}
-                  aria-hidden
-                />
-                <TimelineCard
-                  event={e}
-                  compact={compact}
-                  onPhoto={setViewing}
-                  onEditTreatment={setEditingTreatment}
-                  onOpenComparison={setViewingComparison}
-                  onPickAs={pickAs}
-                  pickedBeforeId={pickedBefore?.id}
-                  pickedAfterId={pickedAfter?.id}
-                />
-              </li>
-            ))}
+            {(() => {
+              let lastYear: number | null = null;
+              return filtered.map((e, i) => {
+                const year = Number(e.date.slice(0, 4));
+                const showYear = year !== lastYear;
+                lastYear = year;
+                return (
+                  <Fragment key={`${e.kind}-${e.date}-${i}`}>
+                    {showYear && <YearDivider year={year} />}
+                    <li className="relative pl-8">
+                      <span
+                        className={`absolute left-[10px] top-4 w-2.5 h-2.5 rounded-full ring-2 ring-rose-50 ${TYPE_STYLE[e.kind].dot}`}
+                        aria-hidden
+                      />
+                      <TimelineCard
+                        event={e}
+                        compact={compact}
+                        onPhoto={setViewing}
+                        onEditTreatment={setEditingTreatment}
+                        onOpenComparison={setViewingComparison}
+                        onPickPhoto={togglePick}
+                        pickedIds={picked.map((x) => x.id!)}
+                        onOpenDay={(date) => setOpenDate(date)}
+                      />
+                    </li>
+                  </Fragment>
+                );
+              });
+            })()}
           </ul>
         </div>
       )}
@@ -346,29 +404,57 @@ export default function Timeline() {
         />
       )}
 
-      {(pickedBefore || pickedAfter) && (
+      {openDate && (
+        <DayDetailModal
+          date={openDate}
+          events={events.filter((e) => e.date === openDate)}
+          onClose={() => setOpenDate(null)}
+          onPhoto={(p) => {
+            setOpenDate(null);
+            setViewing(p);
+          }}
+          onOpenComparison={(c) => {
+            setOpenDate(null);
+            setViewingComparison(c);
+          }}
+          onEditTreatment={(t) => {
+            setOpenDate(null);
+            setEditingTreatment(t);
+          }}
+          onEditProduct={(productId) => {
+            setOpenDate(null);
+            navigate('/products', { state: { editProductId: productId } });
+          }}
+          onEditRating={(date) => {
+            setOpenDate(null);
+            navigate('/', { state: { date } });
+          }}
+        />
+      )}
+
+      {picked.length > 0 && (
         <div className="fixed left-0 right-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 flex justify-center px-4 pointer-events-none">
           <div className="pointer-events-auto card flex items-center gap-3 max-w-md w-full shadow-xl">
             <div className="text-xs text-glow-700 flex-1 min-w-0">
-              <div className="font-semibold">Compare picks</div>
+              <div className="font-semibold">
+                {picked.length === 1 ? 'Pick one more photo' : 'Compare picks'}
+              </div>
               <div className="truncate">
-                {pickedBefore ? `B: ${fmtDate(pickedBefore.date)}` : 'B: —'}
+                {orderedPicks.before
+                  ? `Before: ${fmtDate(orderedPicks.before.date)}`
+                  : '—'}
                 {' · '}
-                {pickedAfter ? `A: ${fmtDate(pickedAfter.date)}` : 'A: —'}
+                {orderedPicks.after
+                  ? `After: ${fmtDate(orderedPicks.after.date)}`
+                  : '—'}
               </div>
             </div>
-            <button
-              className="btn-ghost text-xs"
-              onClick={() => {
-                setPickedBefore(null);
-                setPickedAfter(null);
-              }}
-            >
+            <button className="btn-ghost text-xs" onClick={() => setPicked([])}>
               Clear
             </button>
             <button
               className="btn-primary"
-              disabled={!pickedBefore || !pickedAfter}
+              disabled={picked.length !== 2}
               onClick={goCompare}
             >
               Compare →
@@ -404,27 +490,32 @@ function TimelineCard({
   onPhoto,
   onEditTreatment,
   onOpenComparison,
-  onPickAs,
-  pickedBeforeId,
-  pickedAfterId,
+  onPickPhoto,
+  pickedIds,
+  onOpenDay,
 }: {
   event: Event;
   compact: boolean;
   onPhoto: (p: PhotoEntry) => void;
   onEditTreatment: (t: Treatment) => void;
   onOpenComparison: (c: Comparison) => void;
-  onPickAs: (role: 'before' | 'after', p: PhotoEntry) => void;
-  pickedBeforeId?: number;
-  pickedAfterId?: number;
+  onPickPhoto: (p: PhotoEntry) => void;
+  pickedIds: number[];
+  onOpenDay: (date: string) => void;
 }) {
   const since = event.kind === 'treatment' ? undefined : event.sinceTreatment;
   return (
     <div className={compact ? 'card !py-2.5' : 'card'}>
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-wide text-glow-700">
+          <button
+            type="button"
+            className="text-xs font-semibold uppercase tracking-wide text-glow-700 hover:underline"
+            onClick={() => onOpenDay(event.date)}
+            title="Open day"
+          >
             {fmtDate(event.date)}
-          </div>
+          </button>
           {since && !compact && (
             <div className="text-[11px] text-glow-500 mt-0.5">
               {since.days === 0
@@ -442,9 +533,8 @@ function TimelineCard({
           onPhoto={onPhoto}
           onEditTreatment={onEditTreatment}
           onOpenComparison={onOpenComparison}
-          onPickAs={onPickAs}
-          pickedBeforeId={pickedBeforeId}
-          pickedAfterId={pickedAfterId}
+          onPickPhoto={onPickPhoto}
+          pickedIds={pickedIds}
         />
       </div>
     </div>
@@ -476,18 +566,16 @@ function Body({
   onPhoto,
   onEditTreatment,
   onOpenComparison,
-  onPickAs,
-  pickedBeforeId,
-  pickedAfterId,
+  onPickPhoto,
+  pickedIds,
 }: {
   event: Event;
   compact: boolean;
   onPhoto: (p: PhotoEntry) => void;
   onEditTreatment: (t: Treatment) => void;
   onOpenComparison: (c: Comparison) => void;
-  onPickAs: (role: 'before' | 'after', p: PhotoEntry) => void;
-  pickedBeforeId?: number;
-  pickedAfterId?: number;
+  onPickPhoto: (p: PhotoEntry) => void;
+  pickedIds: number[];
 }) {
   switch (event.kind) {
     case 'photo':
@@ -502,60 +590,36 @@ function Body({
       return (
         <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5">
           {event.photos.map((p) => {
-            const isB = pickedBeforeId === p.id;
-            const isA = pickedAfterId === p.id;
+            const pos = pickedIds.indexOf(p.id!);
+            const picked = pos >= 0;
             return (
               <div
                 key={p.id}
                 className={`relative aspect-square rounded-lg overflow-hidden border-2 ${
-                  isB || isA ? 'border-glow-600' : 'border-transparent'
+                  picked ? 'border-glow-600' : 'border-transparent'
                 }`}
               >
                 <button
                   type="button"
-                  onClick={() => onPhoto(p)}
+                  onClick={() => onPickPhoto(p)}
+                  onDoubleClick={() => onPhoto(p)}
                   className="absolute inset-0 block focus:outline-none"
-                  aria-label={`Open photo from ${p.date}`}
+                  aria-label={
+                    picked
+                      ? 'Unpick photo'
+                      : 'Pick photo for compare (double-tap to open)'
+                  }
                 >
                   <PhotoThumb blob={p.thumb} className="w-full h-full object-cover" />
                 </button>
                 <span className="absolute bottom-0.5 left-0.5 rounded-full bg-white/90 text-glow-800 text-[9px] px-1.5 py-0.5 font-medium pointer-events-none">
                   {ZONES.find((z) => z.id === p.zone)?.label ?? p.zone}
                 </span>
-                <div className="absolute top-0.5 right-0.5 flex gap-0.5">
-                  <button
-                    type="button"
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      onPickAs('before', p);
-                    }}
-                    aria-pressed={isB}
-                    aria-label={isB ? 'Unset Before' : 'Set as Before'}
-                    className={`h-5 min-w-[20px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center shadow-sm transition ${
-                      isB
-                        ? 'bg-glow-600 text-white'
-                        : 'bg-white/90 text-glow-700 hover:bg-white'
-                    }`}
-                  >
-                    B
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      onPickAs('after', p);
-                    }}
-                    aria-pressed={isA}
-                    aria-label={isA ? 'Unset After' : 'Set as After'}
-                    className={`h-5 min-w-[20px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center shadow-sm transition ${
-                      isA
-                        ? 'bg-glow-700 text-white'
-                        : 'bg-white/90 text-glow-700 hover:bg-white'
-                    }`}
-                  >
-                    A
-                  </button>
-                </div>
+                {picked && (
+                  <span className="absolute top-0.5 right-0.5 h-5 w-5 rounded-full bg-glow-600 text-white text-[10px] font-bold flex items-center justify-center shadow-sm pointer-events-none">
+                    {pos + 1}
+                  </span>
+                )}
               </div>
             );
           })}
@@ -756,8 +820,6 @@ function TreatmentBody({
   compact: boolean;
   onEdit: (t: Treatment) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const plan = AFTERCARE[treatment.type];
   const label =
     treatment.customName || TREATMENT_TYPES.find((x) => x.id === treatment.type)?.label;
   return (
@@ -775,27 +837,273 @@ function TreatmentBody({
       {!compact && treatment.notes && (
         <div className="text-xs text-glow-700 italic mt-1">{treatment.notes}</div>
       )}
-      {!compact && (
-        <>
-          <button
-            type="button"
-            className="mt-2 text-[11px] font-semibold text-glow-700 underline"
-            onClick={() => setOpen((o) => !o)}
-          >
-            {open ? 'Hide aftercare' : 'Show aftercare'}
-          </button>
-          {open && (
-            <div className="mt-2 rounded-xl bg-glow-50 p-3 text-xs text-glow-800">
-              <p className="font-medium mb-1">{plan.summary}</p>
-              <AftercareList plan={plan} />
-            </div>
-          )}
-        </>
-      )}
+      {/* Aftercare details available inside the editor via Edit. */}
     </div>
   );
 }
 
 function dateKey(iso: string): number {
   return Number(iso.replace(/-/g, ''));
+}
+
+function YearDivider({ year }: { year: number }) {
+  return (
+    <li className="relative pl-8 mt-4 first:mt-0">
+      <div className="flex items-center gap-3">
+        <div className="font-display text-2xl text-glow-800 tracking-tight">{year}</div>
+        <div className="flex-1 h-px bg-glow-200" />
+      </div>
+    </li>
+  );
+}
+
+function CalendarView({
+  months,
+  events,
+  onPhoto,
+  onOpenComparison,
+  onEditTreatment,
+  onEditProduct,
+  onEditRating,
+}: {
+  months: 3 | 6;
+  events: Event[];
+  onPhoto: (p: PhotoEntry) => void;
+  onOpenComparison: (c: Comparison) => void;
+  onEditTreatment: (t: Treatment) => void;
+  onEditProduct: (productId: number) => void;
+  onEditRating: (date: string) => void;
+}) {
+  const [openDate, setOpenDate] = useState<string | null>(null);
+
+  // Group events by ISO date
+  const byDate = useMemo(() => {
+    const map = new Map<string, Event[]>();
+    events.forEach((e) => {
+      const arr = map.get(e.date) ?? [];
+      arr.push(e);
+      map.set(e.date, arr);
+    });
+    return map;
+  }, [events]);
+
+  // Build the months to render: ending with current month, going back N-1.
+  const monthList = useMemo(() => {
+    const out: { y: number; m: number }[] = [];
+    const now = new Date();
+    for (let i = months - 1; i >= 0; i -= 1) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      out.push({ y: d.getFullYear(), m: d.getMonth() });
+    }
+    return out;
+  }, [months]);
+
+  return (
+    <>
+      <div className="space-y-4">
+        {monthList.map((mo) => (
+          <MonthGrid
+            key={`${mo.y}-${mo.m}`}
+            year={mo.y}
+            month={mo.m}
+            byDate={byDate}
+            onOpen={setOpenDate}
+          />
+        ))}
+        <div className="card text-[11px] text-glow-600 flex flex-wrap gap-2">
+          <span>Legend:</span>
+          {([
+            ['photo', 'Photo'],
+            ['product-start', 'Product'],
+            ['treatment', 'Treatment'],
+            ['comparison', 'Compare'],
+            ['rating', 'Rating'],
+          ] as const).map(([k, label]) => (
+            <span key={k} className="inline-flex items-center gap-1">
+              <span className={`h-2 w-2 rounded-full ${TYPE_STYLE[k].dot}`} />
+              {label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {openDate && (
+        <DayDetailModal
+          date={openDate}
+          events={byDate.get(openDate) ?? []}
+          onClose={() => setOpenDate(null)}
+          onPhoto={onPhoto}
+          onOpenComparison={onOpenComparison}
+          onEditTreatment={onEditTreatment}
+          onEditProduct={onEditProduct}
+          onEditRating={onEditRating}
+        />
+      )}
+    </>
+  );
+}
+
+function MonthGrid({
+  year,
+  month,
+  byDate,
+  onOpen,
+}: {
+  year: number;
+  month: number; // 0-11
+  byDate: Map<string, Event[]>;
+  onOpen: (date: string) => void;
+}) {
+  const monthName = new Date(year, month, 1).toLocaleDateString(undefined, {
+    month: 'long',
+    year: 'numeric',
+  });
+  const first = new Date(year, month, 1);
+  const startWeekday = first.getDay(); // 0 = Sun
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < startWeekday; i += 1) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d += 1) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const todayISOStr = todayISO();
+
+  return (
+    <section className="card">
+      <h3 className="font-display text-base text-glow-800 mb-2">{monthName}</h3>
+      <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-glow-500 mb-1">
+        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+          <div key={i}>{d}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((d, i) => {
+          if (d === null) return <div key={i} className="aspect-square" />;
+          const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+          const dayEvents = byDate.get(iso) ?? [];
+          const isFuture = iso > todayISOStr;
+          const isToday = iso === todayISOStr;
+          const rating = dayEvents.find((e) => e.kind === 'rating') as
+            | (Event & { kind: 'rating' })
+            | undefined;
+          const ratingBg = rating ? ratingTint(rating.rating) : '';
+          // Distinct event-type dots (max 4 visible)
+          const types = Array.from(
+            new Set(dayEvents.map((e) => e.kind).filter((k) => k !== 'rating')),
+          );
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => dayEvents.length > 0 && onOpen(iso)}
+              disabled={dayEvents.length === 0}
+              className={`aspect-square rounded-md text-[10px] flex flex-col items-center justify-start p-0.5 ${
+                ratingBg || (dayEvents.length > 0 ? 'bg-glow-50' : 'bg-white/30')
+              } ${isFuture ? 'opacity-40' : ''} ${
+                isToday ? 'ring-1 ring-glow-500' : ''
+              } ${dayEvents.length > 0 ? 'hover:ring-1 hover:ring-glow-400' : ''}`}
+              aria-label={`${iso} — ${dayEvents.length} event${dayEvents.length === 1 ? '' : 's'}`}
+            >
+              <span className={`text-[10px] ${dayEvents.length > 0 ? 'font-semibold text-glow-900' : 'text-glow-600'}`}>
+                {d}
+              </span>
+              {types.length > 0 && (
+                <div className="mt-auto flex gap-0.5 pb-0.5">
+                  {types.slice(0, 4).map((t) => (
+                    <span
+                      key={t}
+                      className={`h-1 w-1 rounded-full ${TYPE_STYLE[t].dot}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ratingTint(r: number): string {
+  if (r === 5) return 'bg-emerald-200';
+  if (r === 4) return 'bg-emerald-100';
+  if (r === 3) return 'bg-yellow-100';
+  if (r === 2) return 'bg-amber-200';
+  if (r === 1) return 'bg-red-200';
+  return '';
+}
+
+function DayDetailModal({
+  date,
+  events,
+  onClose,
+  onPhoto,
+  onOpenComparison,
+  onEditTreatment,
+  onEditProduct,
+  onEditRating,
+}: {
+  date: string;
+  events: Event[];
+  onClose: () => void;
+  onPhoto: (p: PhotoEntry) => void;
+  onOpenComparison: (c: Comparison) => void;
+  onEditTreatment: (t: Treatment) => void;
+  onEditProduct: (productId: number) => void;
+  onEditRating: (date: string) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/40 p-3">
+      <div className="card w-full max-w-md max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-display text-lg text-glow-800">{fmtDate(date)}</h3>
+          <button className="btn-ghost text-xs" onClick={onClose} aria-label="Close">
+            Close
+          </button>
+        </div>
+        <ul className="space-y-2">
+          {events.map((e, i) => (
+            <li
+              key={i}
+              className="rounded-xl border border-glow-100 p-2"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <Badge kind={e.kind} />
+                {e.kind === 'product-start' || e.kind === 'product-stop' ? (
+                  e.productId ? (
+                    <button
+                      className="text-[11px] text-glow-700 underline"
+                      onClick={() => onEditProduct(e.productId!)}
+                    >
+                      Edit product
+                    </button>
+                  ) : null
+                ) : e.kind === 'rating' ? (
+                  <button
+                    className="text-[11px] text-glow-700 underline"
+                    onClick={() => onEditRating(e.date)}
+                  >
+                    Edit rating
+                  </button>
+                ) : null}
+              </div>
+              <Body
+                event={e}
+                compact={false}
+                onPhoto={onPhoto}
+                onEditTreatment={onEditTreatment}
+                onOpenComparison={onOpenComparison}
+                onPickPhoto={() => {}}
+                pickedIds={[]}
+              />
+            </li>
+          ))}
+        </ul>
+        <div className="mt-3 flex justify-end">
+          <button className="btn-primary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
 }
