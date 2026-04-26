@@ -1,7 +1,7 @@
 // Gemini vision client for product recognition. Uses the user's own API
 // key (stored locally) and the structured-output mode of generateContent.
 
-import { CONCERNS, PRODUCT_STEPS, type Concern, type ProductStep } from '../db/schema';
+import { CONCERNS, PRODUCT_STEPS, ZONES, type Concern, type ProductStep, type Zone } from '../db/schema';
 import { getGeminiKey, getGeminiModel } from './settings';
 
 export interface ScannedProduct {
@@ -172,4 +172,74 @@ export async function scanProductsFromImage(image: Blob): Promise<ScannedProduct
 
   const products = Array.isArray(parsed.products) ? parsed.products : [];
   return products.map(normalize).filter((p) => p.name);
+}
+
+// ----- Zone classification --------------------------------------------------
+
+const ZONE_PROMPT = `You are looking at a photo from a personal skincare journal.
+Decide which face zone the photo most clearly shows. Choose exactly one of:
+
+- "full": straight-on full-face portrait
+- "leftCheek": face turned to show the LEFT side of the subject's face
+  (the subject's left, NOT the viewer's left)
+- "rightCheek": face turned to show the RIGHT side of the subject's face
+- "forehead": photo focused on the forehead area
+- "chin": photo focused on the chin/jaw area
+- "nose": photo focused on the nose / T-zone
+
+If you can't tell, pick "full".`;
+
+const ZONE_SCHEMA = {
+  type: 'object',
+  properties: {
+    zone: { type: 'string', enum: ZONES.map((z) => z.id) },
+  },
+  required: ['zone'],
+};
+
+export async function classifyPhotoZone(image: Blob): Promise<Zone> {
+  const key = getGeminiKey();
+  if (!key) throw new Error('No Gemini API key set.');
+  const model = getGeminiModel();
+  const { data, mime } = await blobToBase64(image);
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model,
+  )}:generateContent?key=${encodeURIComponent(key)}`;
+
+  const body = {
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { inline_data: { mime_type: mime, data } },
+          { text: ZONE_PROMPT },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: ZONE_SCHEMA,
+      temperature: 0,
+    },
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) throw new Error(`Gemini classify failed (${res.status})`);
+
+  const json = await res.json();
+  const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) return 'full';
+  try {
+    const parsed = JSON.parse(text);
+    if (ZONES.some((z) => z.id === parsed.zone)) return parsed.zone as Zone;
+  } catch {
+    // fall through
+  }
+  return 'full';
 }
