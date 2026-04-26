@@ -98,7 +98,20 @@ export interface Product {
   rating?: number;                // 1–5; user's overall rating of the product
   comments?: string;              // free-form review/comments
   sortOrder?: number;             // explicit display order (lower = earlier)
+  // Optional weekly schedule per period. 0=Sun..6=Sat. Empty (or absent)
+  // arrays = use the period's default (every day the period is active).
+  schedule?: { am?: number[]; pm?: number[] };
 }
+
+export const WEEKDAYS: { id: number; short: string; label: string }[] = [
+  { id: 0, short: 'S', label: 'Sun' },
+  { id: 1, short: 'M', label: 'Mon' },
+  { id: 2, short: 'T', label: 'Tue' },
+  { id: 3, short: 'W', label: 'Wed' },
+  { id: 4, short: 'T', label: 'Thu' },
+  { id: 5, short: 'F', label: 'Fri' },
+  { id: 6, short: 'S', label: 'Sat' },
+];
 
 export type TreatmentType =
   | 'facial'

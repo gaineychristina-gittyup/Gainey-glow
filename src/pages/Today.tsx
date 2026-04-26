@@ -331,8 +331,17 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
     }
   }
 
-  const am = products.filter((p) => p.timeOfDay.includes('am'));
-  const pm = products.filter((p) => p.timeOfDay.includes('pm'));
+  // Compute today's weekday (0=Sun..6=Sat) from the selected date.
+  const [y, mo, d] = date.split('-').map(Number);
+  const weekday = new Date(y, (mo ?? 1) - 1, d ?? 1).getDay();
+  function periodActive(p: Product, period: 'am' | 'pm') {
+    if (!p.timeOfDay.includes(period)) return false;
+    const days = p.schedule?.[period];
+    if (!days || days.length === 0) return true; // every day by default
+    return days.includes(weekday);
+  }
+  const am = products.filter((p) => periodActive(p, 'am'));
+  const pm = products.filter((p) => periodActive(p, 'pm'));
 
   if (products.length === 0) {
     return (
@@ -348,7 +357,7 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
   const total = am.length + pm.length;
   const done = (logs ?? []).filter((l) =>
     products.some(
-      (p) => p.id === l.productId && p.timeOfDay.includes(l.period),
+      (p) => p.id === l.productId && periodActive(p, l.period),
     ),
   ).length;
   const pct = total === 0 ? 0 : Math.round((done / total) * 100);
