@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { Maximize2 } from 'lucide-react';
 import { db, ZONES, type Zone, type PhotoEntry } from '../db/schema';
 import ZonePicker from '../components/ZonePicker';
 import PhotoThumb from '../components/PhotoThumb';
 import CompareSlider from '../components/CompareSlider';
+import PhotoViewer from '../components/PhotoViewer';
 import { fmtDate, fmtDateShort } from '../lib/date';
 
 export default function Compare() {
   const [zone, setZone] = useState<Zone>('full');
   const [beforeId, setBeforeId] = useState<number | undefined>();
   const [afterId, setAfterId] = useState<number | undefined>();
+  const [viewing, setViewing] = useState<PhotoEntry | null>(null);
 
   const photos = useLiveQuery(
     () => db.photos.where('zone').equals(zone).toArray(),
@@ -97,14 +100,17 @@ export default function Compare() {
                     setAfterId(p.id);
                   }
                 }}
+                onView={() => setViewing(p)}
               />
             ))}
           </div>
         )}
         <p className="text-[11px] text-glow-500 mt-2">
-          Tap a photo to set it as Before or After.
+          Tap a photo to set it as Before or After. Tap the corner icon to view or delete it.
         </p>
       </section>
+
+      {viewing && <PhotoViewer photo={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }
@@ -114,30 +120,48 @@ function SelectablePhoto({
   isBefore,
   isAfter,
   onPick,
+  onView,
 }: {
   photo: PhotoEntry;
   isBefore: boolean;
   isAfter: boolean;
   onPick: () => void;
+  onView: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onPick}
+    <div
       className={`relative aspect-square rounded-xl overflow-hidden border-2 transition ${
         isBefore || isAfter ? 'border-glow-600' : 'border-transparent'
       }`}
     >
-      <PhotoThumb blob={photo.thumb} className="w-full h-full object-cover" alt={photo.date} />
-      <span className="absolute bottom-1 left-1 chip bg-white/90 text-[10px]">
+      <button
+        type="button"
+        onClick={onPick}
+        className="absolute inset-0 block focus:outline-none"
+        aria-label={`Select photo from ${photo.date}`}
+      >
+        <PhotoThumb blob={photo.thumb} className="w-full h-full object-cover" alt={photo.date} />
+      </button>
+      <span className="absolute bottom-1 left-1 chip bg-white/90 text-[10px] pointer-events-none">
         {fmtDateShort(photo.date)}
       </span>
       {isBefore && (
-        <span className="absolute top-1 left-1 chip bg-glow-600 text-white">B</span>
+        <span className="absolute top-1 left-1 chip bg-glow-600 text-white pointer-events-none">B</span>
       )}
       {isAfter && (
-        <span className="absolute top-1 right-1 chip bg-glow-600 text-white">A</span>
+        <span className="absolute bottom-1 right-1 chip bg-glow-600 text-white pointer-events-none">A</span>
       )}
-    </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onView();
+        }}
+        aria-label="Open photo"
+        className="absolute top-1 right-1 bg-white/90 hover:bg-white rounded-full p-1 shadow-sm"
+      >
+        <Maximize2 size={12} className="text-glow-800" />
+      </button>
+    </div>
   );
 }

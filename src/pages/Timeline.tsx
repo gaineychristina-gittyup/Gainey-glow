@@ -1,17 +1,19 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Camera, FlaskConical, Sparkles, CircleStop } from 'lucide-react';
-import { db, ZONES, TREATMENT_TYPES, PRODUCT_STEPS } from '../db/schema';
+import { db, ZONES, TREATMENT_TYPES, PRODUCT_STEPS, type PhotoEntry } from '../db/schema';
 import { fmtDate } from '../lib/date';
 import PhotoThumb from '../components/PhotoThumb';
+import PhotoViewer from '../components/PhotoViewer';
 
 type Event =
-  | { kind: 'photo'; date: string; sortKey: number; photos: { id: number; thumb: Blob; zone: string }[] }
+  | { kind: 'photo'; date: string; sortKey: number; photos: PhotoEntry[] }
   | { kind: 'product-start'; date: string; sortKey: number; product: { name: string; brand?: string; step: string } }
   | { kind: 'product-stop'; date: string; sortKey: number; product: { name: string; brand?: string; step: string } }
   | { kind: 'treatment'; date: string; sortKey: number; treatment: { type: string; customName?: string; provider?: string; notes?: string } };
 
 export default function Timeline() {
+  const [viewing, setViewing] = useState<PhotoEntry | null>(null);
   const photos = useLiveQuery(() => db.photos.toArray(), []);
   const products = useLiveQuery(() => db.products.toArray(), []);
   const treatments = useLiveQuery(() => db.treatments.toArray(), []);
@@ -20,10 +22,10 @@ export default function Timeline() {
     const out: Event[] = [];
 
     // Group photos by date
-    const photoMap = new Map<string, { id: number; thumb: Blob; zone: string }[]>();
+    const photoMap = new Map<string, PhotoEntry[]>();
     (photos ?? []).forEach((p) => {
       const arr = photoMap.get(p.date) ?? [];
-      arr.push({ id: p.id!, thumb: p.thumb, zone: p.zone });
+      arr.push(p);
       photoMap.set(p.date, arr);
     });
     photoMap.forEach((list, date) => {
@@ -80,16 +82,24 @@ export default function Timeline() {
           {events.map((e, i) => (
             <li key={i} className="relative">
               <span className="absolute -left-[18px] top-2 w-3 h-3 rounded-full bg-glow-500 ring-2 ring-rose-50" />
-              <TimelineCard event={e} />
+              <TimelineCard event={e} onPhoto={setViewing} />
             </li>
           ))}
         </ul>
       </div>
+
+      {viewing && <PhotoViewer photo={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }
 
-function TimelineCard({ event }: { event: Event }) {
+function TimelineCard({
+  event,
+  onPhoto,
+}: {
+  event: Event;
+  onPhoto: (p: PhotoEntry) => void;
+}) {
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-2">
@@ -98,7 +108,7 @@ function TimelineCard({ event }: { event: Event }) {
         </span>
         <Badge kind={event.kind} />
       </div>
-      <Body event={event} />
+      <Body event={event} onPhoto={onPhoto} />
     </div>
   );
 }
@@ -116,18 +126,29 @@ function Badge({ kind }: { kind: Event['kind'] }) {
   }
 }
 
-function Body({ event }: { event: Event }) {
+function Body({
+  event,
+  onPhoto,
+}: {
+  event: Event;
+  onPhoto: (p: PhotoEntry) => void;
+}) {
   switch (event.kind) {
     case 'photo':
       return (
         <div className="grid grid-cols-4 gap-1.5">
           {event.photos.map((p) => (
-            <div key={p.id} className="relative">
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => onPhoto(p)}
+              className="relative block focus:outline-none focus:ring-2 focus:ring-glow-500 rounded-lg"
+            >
               <PhotoThumb blob={p.thumb} className="aspect-square w-full object-cover rounded-lg" />
               <span className="absolute bottom-1 left-1 chip text-[10px] bg-white/90">
                 {ZONES.find((z) => z.id === p.zone)?.label ?? p.zone}
               </span>
-            </div>
+            </button>
           ))}
         </div>
       );
