@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useLocation } from 'react-router-dom';
-import { AlertTriangle, Loader2, Pencil, Plus, ScanLine, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Loader2, Pencil, Plus, ScanLine, Trash2, X } from 'lucide-react';
 import {
   CONCERNS,
   PRODUCT_CATEGORIES,
@@ -387,6 +387,8 @@ function ProductCard({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+
   const flags = product.ingredients
     .map((i) => {
       const lower = i.toLowerCase();
@@ -406,73 +408,127 @@ function ProductCard({
     findIngredientInfo(i)?.targets.forEach((t) => concernSet.add(t));
   });
 
+  const stepLabel = PRODUCT_STEPS.find((s) => s.id === product.step)?.label;
+  const timeLabel = product.timeOfDay.length === 2 ? 'AM/PM' : product.timeOfDay.join('/').toUpperCase();
+
   return (
-    <section className="card">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <h3 className="font-display text-lg text-glow-900 truncate">{product.name}</h3>
+    <section className="card !p-3">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-2 text-left"
+        aria-expanded={expanded}
+      >
+        <ChevronRight
+          size={14}
+          className={`text-glow-500 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-1.5 flex-wrap">
             {product.brand && (
-              <span className="text-xs text-glow-600">{product.brand}</span>
+              <span className="font-display font-bold text-glow-900 truncate">{product.brand}</span>
             )}
-            <span className="chip">{PRODUCT_STEPS.find((s) => s.id === product.step)?.label}</span>
-            <span className="text-[11px] text-glow-500">
-              {product.timeOfDay.length === 2 ? 'AM/PM' : product.timeOfDay.join('/').toUpperCase()}
-            </span>
+            <span className="text-sm text-glow-700 truncate">{product.name}</span>
           </div>
-          <p className="text-[11px] text-glow-500 mt-0.5">
+          <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+            <span className="chip text-[10px]">{stepLabel}</span>
+            <span className="text-[10px] text-glow-500">{timeLabel}</span>
+            {flags.length > 0 && (
+              <span className="chip-warn text-[10px]" title={`${flags.length} flagged ingredient${flags.length === 1 ? '' : 's'}`}>
+                <AlertTriangle size={10} /> {flags.length}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-0.5 shrink-0">
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                onEdit();
+              }
+            }}
+            className="btn-ghost p-2 cursor-pointer"
+            aria-label="Edit"
+          >
+            <Pencil size={14} />
+          </span>
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                onDelete();
+              }
+            }}
+            className="btn-ghost p-2 text-red-600 cursor-pointer"
+            aria-label="Delete"
+          >
+            <Trash2 size={14} />
+          </span>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="mt-3 space-y-3 border-t border-glow-100 pt-3">
+          <div className="text-[11px] text-glow-500">
             Started {fmtDate(product.startedOn)}
             {product.stoppedOn ? ` · stopped ${fmtDate(product.stoppedOn)}` : ''}
-          </p>
-        </div>
-        <div className="flex gap-1">
-          <button className="btn-ghost p-2" onClick={onEdit} aria-label="Edit">
-            <Pencil size={14} />
-          </button>
-          <button className="btn-ghost p-2 text-red-600" onClick={onDelete} aria-label="Delete">
-            <Trash2 size={14} />
-          </button>
-        </div>
-      </div>
-
-      {concernSet.size > 0 && (
-        <div className="mt-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-glow-700 mb-1">Targets</div>
-          <div className="flex flex-wrap gap-1.5">
-            {Array.from(concernSet).map((c) => (
-              <span key={c} className="chip">{CONCERNS.find((x) => x.id === c)?.label ?? c}</span>
-            ))}
           </div>
-        </div>
-      )}
 
-      {product.ingredients.length > 0 && (
-        <div className="mt-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-glow-700 mb-1">Ingredients</div>
-          <p className="text-xs text-glow-700 leading-relaxed">{product.ingredients.join(', ')}</p>
-        </div>
-      )}
+          {concernSet.size > 0 && (
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-glow-700 mb-1">Targets</div>
+              <div className="flex flex-wrap gap-1.5">
+                {Array.from(concernSet).map((c) => (
+                  <span key={c} className="chip">{CONCERNS.find((x) => x.id === c)?.label ?? c}</span>
+                ))}
+              </div>
+            </div>
+          )}
 
-      {flags.length > 0 && (
-        <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-3">
-          <div className="flex items-center gap-1.5 text-amber-800 font-semibold text-xs mb-1">
-            <AlertTriangle size={14} /> Heads up
-          </div>
-          <ul className="space-y-1">
-            {flags.map((f, i) => (
-              <li key={i} className="text-xs text-amber-900">
-                <span className={f.severity === 'severe' ? 'chip-danger mr-1' : 'chip-warn mr-1'}>
-                  {f.ingredient}
-                </span>
-                {f.reason}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+          {product.ingredients.length > 0 && (
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-glow-700 mb-1">Ingredients</div>
+              <p className="text-xs text-glow-700 leading-relaxed">{product.ingredients.join(', ')}</p>
+            </div>
+          )}
 
-      {product.notes && (
-        <p className="mt-3 text-xs text-glow-600 italic">{product.notes}</p>
+          {flags.length > 0 && (
+            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
+              <div className="flex items-center gap-1.5 text-amber-800 font-semibold text-xs mb-1">
+                <AlertTriangle size={14} /> Heads up
+              </div>
+              <ul className="space-y-1">
+                {flags.map((f, i) => (
+                  <li key={i} className="text-xs text-amber-900">
+                    <span className={f.severity === 'severe' ? 'chip-danger mr-1' : 'chip-warn mr-1'}>
+                      {f.ingredient}
+                    </span>
+                    {f.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {product.notes && (
+            <p className="text-xs text-glow-600 italic">{product.notes}</p>
+          )}
+        </div>
       )}
     </section>
   );
