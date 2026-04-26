@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useLocation } from 'react-router-dom';
-import { Camera, Check, ChevronLeft, ChevronRight, Sun, Moon, Upload } from 'lucide-react';
+import { Camera, Check, ChevronLeft, ChevronRight, Plus, Sun, Moon, Upload } from 'lucide-react';
 import { db, ZONES, type PhotoEntry, type Product, type Zone } from '../db/schema';
 import { todayISO, fmtDate, relDays, fmtDateShort, shiftDate } from '../lib/date';
 import { makeThumbnail } from '../lib/image';
@@ -340,8 +340,34 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
     if (!days || days.length === 0) return true; // every day by default
     return days.includes(weekday);
   }
-  const am = products.filter((p) => periodActive(p, 'am'));
-  const pm = products.filter((p) => periodActive(p, 'pm'));
+  // Scheduled and ad-hoc (any logged-but-not-scheduled) products per period.
+  const scheduledAm = products.filter((p) => periodActive(p, 'am'));
+  const scheduledPm = products.filter((p) => periodActive(p, 'pm'));
+  const adHocIds = (period: 'am' | 'pm') =>
+    new Set(
+      (logs ?? [])
+        .filter((l) => l.period === period)
+        .map((l) => l.productId),
+    );
+  const adHocAm = products.filter(
+    (p) => p.id != null && adHocIds('am').has(p.id) && !scheduledAm.includes(p),
+  );
+  const adHocPm = products.filter(
+    (p) => p.id != null && adHocIds('pm').has(p.id) && !scheduledPm.includes(p),
+  );
+  const am = [...scheduledAm, ...adHocAm];
+  const pm = [...scheduledPm, ...adHocPm];
+  const isAdHoc = (productId: number, period: 'am' | 'pm') =>
+    period === 'am'
+      ? adHocAm.some((p) => p.id === productId)
+      : adHocPm.some((p) => p.id === productId);
+  const candidatesFor = (period: 'am' | 'pm') =>
+    products.filter(
+      (p) =>
+        p.id != null &&
+        !(period === 'am' ? scheduledAm : scheduledPm).includes(p) &&
+        !(period === 'am' ? adHocAm : adHocPm).includes(p),
+    );
 
   if (products.length === 0) {
     return (
@@ -381,6 +407,11 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
           products={am}
           isDone={(id) => isDone(id, 'am')}
           onToggle={(id) => toggle(id, 'am')}
+          isAdHoc={(id) => isAdHoc(id, 'am')}
+          candidates={candidatesFor('am')}
+          onAdd={async (id) => {
+            await db.routineLogs.add({ date, productId: id, period: 'am' });
+          }}
         />
         <RoutineColumn
           icon={<Moon size={16} className="text-indigo-500" />}
@@ -388,6 +419,11 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
           products={pm}
           isDone={(id) => isDone(id, 'pm')}
           onToggle={(id) => toggle(id, 'pm')}
+          isAdHoc={(id) => isAdHoc(id, 'pm')}
+          candidates={candidatesFor('pm')}
+          onAdd={async (id) => {
+            await db.routineLogs.add({ date, productId: id, period: 'pm' });
+          }}
         />
       </div>
     </section>
@@ -513,24 +549,33 @@ function RoutineColumn({
   products,
   isDone,
   onToggle,
+  isAdHoc,
+  candidates,
+  onAdd,
 }: {
   icon: React.ReactNode;
   label: string;
   products: Product[];
   isDone: (productId: number) => boolean;
   onToggle: (productId: number) => void;
+  isAdHoc: (productId: number) => boolean;
+  candidates: Product[];
+  onAdd: (productId: number) => Promise<void>;
 }) {
+  const [adding, setAdding] = useState(false);
+
   return (
     <div>
       <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-glow-700 mb-2">
         {icon} {label}
       </div>
       {products.length === 0 ? (
-        <p className="text-xs text-glow-500">No {label.toLowerCase()} products.</p>
+        <p className="text-xs text-glow-500">No {label.toLowerCase()} products scheduled.</p>
       ) : (
         <ul className="space-y-1.5">
           {products.map((p) => {
             const done = isDone(p.id!);
+            const adHoc = isAdHoc(p.id!);
             return (
               <li key={p.id}>
                 <button
@@ -540,7 +585,7 @@ function RoutineColumn({
                     done
                       ? 'bg-glow-100 border-glow-300 text-glow-900'
                       : 'bg-white border-glow-200 text-glow-800 hover:bg-glow-50'
-                  }`}
+                  } ${adHoc ? 'border-dashed' : ''}`}
                 >
                   <span
                     className={`flex h-5 w-5 items-center justify-center rounded-md border ${
@@ -554,15 +599,65 @@ function RoutineColumn({
                     <span className={`block truncate font-medium ${done ? 'line-through opacity-70' : ''}`}>
                       {p.name}
                     </span>
-                    {p.brand && (
-                      <span className="block text-[11px] text-glow-500 truncate">{p.brand}</span>
-                    )}
+                    <span className="block text-[11px] text-glow-500 truncate">
+                      {p.brand}
+                      {p.brand && adHoc ? ' · ' : ''}
+                      {adHoc && <span className="text-glow-700">ad-hoc</span>}
+                    </span>
                   </span>
                 </button>
               </li>
             );
           })}
         </ul>
+      )}
+
+      {candidates.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="mt-2 w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-glow-300 px-3 py-2 text-xs text-glow-700 hover:bg-glow-50"
+        >
+          <Plus size={14} /> Add another product
+        </button>
+      )}
+
+      {adding && (
+        <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/40 p-3">
+          <div className="card w-full max-w-md max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-display text-lg text-glow-800">Add to {label}</h3>
+              <button className="btn-ghost text-xs" onClick={() => setAdding(false)}>Close</button>
+            </div>
+            <p className="text-xs text-glow-600 mb-3">
+              Mark a product you used today even though it isn't on the schedule. It'll show
+              as <span className="italic">ad-hoc</span> with a dashed border.
+            </p>
+            {candidates.length === 0 ? (
+              <p className="text-sm text-glow-600/80">No more active products to add.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {candidates.map((p) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await onAdd(p.id!);
+                        setAdding(false);
+                      }}
+                      className="w-full text-left rounded-xl border border-glow-200 bg-white hover:bg-glow-50 px-3 py-2"
+                    >
+                      <div className="text-sm font-medium text-glow-900 truncate">{p.name}</div>
+                      {p.brand && (
+                        <div className="text-[11px] text-glow-500 truncate">{p.brand}</div>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
