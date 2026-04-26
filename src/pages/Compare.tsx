@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { useLocation } from 'react-router-dom';
 import { Bookmark, Check, Maximize2 } from 'lucide-react';
 import {
   db,
@@ -25,9 +26,22 @@ interface ReferencePoint {
 }
 
 export default function Compare() {
-  const [zone, setZone] = useState<Zone>('full');
-  const [beforeId, setBeforeId] = useState<number | undefined>();
-  const [afterId, setAfterId] = useState<number | undefined>();
+  const location = useLocation();
+  const seed = (location.state ?? null) as
+    | { zone?: Zone; beforeId?: number; afterId?: number }
+    | null;
+  const [zone, setZone] = useState<Zone>(seed?.zone ?? 'full');
+  const [beforeId, setBeforeId] = useState<number | undefined>(seed?.beforeId);
+  const [afterId, setAfterId] = useState<number | undefined>(seed?.afterId);
+
+  // Re-seed if user navigates here again with different selections.
+  useEffect(() => {
+    if (!seed) return;
+    if (seed.zone) setZone(seed.zone);
+    if (seed.beforeId !== undefined) setBeforeId(seed.beforeId);
+    if (seed.afterId !== undefined) setAfterId(seed.afterId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
   const [viewing, setViewing] = useState<PhotoEntry | null>(null);
   const [caption, setCaption] = useState('');
   const [referenceKey, setReferenceKey] = useState<string>('date');
@@ -39,7 +53,7 @@ export default function Compare() {
   const treatments = useLiveQuery(() => db.treatments.toArray(), []);
 
   const sorted = useMemo(
-    () => [...(photos ?? [])].sort((a, b) => a.takenAt - b.takenAt),
+    () => [...(photos ?? [])].sort((a, b) => a.date.localeCompare(b.date) || a.takenAt - b.takenAt),
     [photos],
   );
 
@@ -90,10 +104,10 @@ export default function Compare() {
 
   const beforeLabel = reference
     ? `Before · ${refLabel(reference, before?.date)}`
-    : `Before · ${before ? fmtDateShort(before.date) : ''}`;
+    : `Before · ${before ? fmtDate(before.date) : ''}`;
   const afterLabel = reference
     ? `After · ${refLabel(reference, after?.date)}`
-    : `After · ${after ? fmtDateShort(after.date) : ''}`;
+    : `After · ${after ? fmtDate(after.date) : ''}`;
 
   async function save() {
     if (!before || !after || !before.id || !after.id) return;
@@ -345,7 +359,7 @@ function SelectablePhoto({
         <PhotoThumb blob={photo.thumb} className="w-full h-full object-cover" alt={photo.date} />
       </button>
       <span className="absolute bottom-1 left-1 chip bg-white/90 text-[10px] pointer-events-none">
-        {fmtDateShort(photo.date)}
+        {fmtDate(photo.date)}
       </span>
       {isBefore && (
         <span className="absolute top-1 left-1 chip bg-glow-600 text-white pointer-events-none">B</span>
