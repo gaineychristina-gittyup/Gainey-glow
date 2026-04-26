@@ -212,8 +212,6 @@ export default function Today() {
 
       {viewing && <PhotoViewer photo={viewing} onClose={() => setViewing(null)} />}
 
-      <SkinRatingCard date={date} />
-
       <section className="card">
         <h3 className="font-display text-lg text-glow-800 mb-3">Captured today</h3>
         {(photosToday?.length ?? 0) === 0 ? (
@@ -430,118 +428,6 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
   );
 }
 
-function SkinRatingCard({ date }: { date: string }) {
-  const rating = useLiveQuery(
-    () => db.skinRatings.where('date').equals(date).first(),
-    [date],
-  );
-  const persisted = rating?.rating ?? 0;
-  const persistedNotes = rating?.notes ?? '';
-  const [local, setLocal] = useState(persisted);
-  const [notesDraft, setNotesDraft] = useState(persistedNotes);
-  const [savedAt, setSavedAt] = useState(0);
-  useEffect(() => {
-    setLocal(persisted);
-    setNotesDraft(persistedNotes);
-  }, [persisted, persistedNotes, date]);
-
-  async function persist(v: number, notes: string) {
-    const trimmed = notes.trim();
-    if (rating?.id) {
-      if (v === 0 && !trimmed) {
-        await db.skinRatings.delete(rating.id);
-      } else {
-        await db.skinRatings.update(rating.id, {
-          rating: v,
-          notes: trimmed || undefined,
-        });
-      }
-    } else if (v > 0 || trimmed) {
-      await db.skinRatings.add({ date, rating: v, notes: trimmed || undefined });
-    }
-  }
-
-  async function pickRating(v: number) {
-    setLocal(v);
-    await persist(v, notesDraft);
-  }
-
-  async function submitNotes() {
-    await persist(local, notesDraft);
-    setSavedAt(Date.now());
-    setTimeout(() => setSavedAt((s) => (Date.now() - s > 1500 ? 0 : s)), 1700);
-  }
-
-  const labels = ['Awful', 'Meh', 'OK', 'Good', 'Glowing'];
-  const notesDirty = notesDraft.trim() !== persistedNotes.trim();
-
-  return (
-    <section className="card">
-      <h3 className="font-display text-lg text-glow-800 mb-1">Skin rating</h3>
-      <p className="text-xs text-glow-600 mb-2">
-        How does your skin look and feel today? 1 = awful, 5 = glowing.
-      </p>
-      <div className="flex items-center gap-3">
-        <input
-          type="range"
-          min={0}
-          max={5}
-          step={1}
-          value={local}
-          onChange={(e) => setLocal(Math.round(Number(e.target.value)))}
-          onPointerUp={(e) => pickRating(Math.round(Number((e.target as HTMLInputElement).value)))}
-          onKeyUp={(e) => pickRating(Math.round(Number((e.target as HTMLInputElement).value)))}
-          className="flex-1 accent-pink-500"
-          aria-label="Skin rating, 0 to 5"
-        />
-        <div className="text-2xl font-display tabular-nums w-10 text-right text-glow-900">
-          {local === 0 ? '—' : local}
-        </div>
-      </div>
-      <div className="mt-2 grid grid-cols-6 gap-1 text-xs select-none">
-        {[0, 1, 2, 3, 4, 5].map((n) => (
-          <button
-            key={n}
-            type="button"
-            onClick={() => pickRating(n)}
-            className={`rounded-full py-1 font-medium border transition ${
-              n === local
-                ? 'bg-glow-600 text-white border-glow-600'
-                : 'bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50'
-            }`}
-            aria-label={`Set rating to ${n === 0 ? 'cleared' : n}`}
-          >
-            {n === 0 ? '—' : n}
-          </button>
-        ))}
-      </div>
-      {local > 0 && (
-        <div className="mt-2 text-xs text-glow-700 italic">{labels[local - 1]}</div>
-      )}
-
-      <label className="label mt-3">Notes</label>
-      <textarea
-        className="input min-h-[60px]"
-        placeholder="What's going on with your skin today? Breakouts, dryness, products tried, weather, sleep…"
-        value={notesDraft}
-        onChange={(e) => setNotesDraft(e.target.value)}
-      />
-      <div className="mt-2 flex items-center justify-end gap-2 text-[11px]">
-        {savedAt > 0 && Date.now() - savedAt < 1500 && (
-          <span className="text-emerald-700 font-medium">Saved ✓</span>
-        )}
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={submitNotes}
-          disabled={!notesDirty}
-        >
-          Save notes
-        </button>
-      </div>
-    </section>
-  );
-}
 
 function RoutineColumn({
   icon,

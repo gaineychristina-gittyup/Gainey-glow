@@ -53,6 +53,8 @@ export default function CompareSlider({
   const containerRef = useRef<HTMLDivElement>(null);
   const beforeImgRef = useRef<HTMLImageElement>(null);
   const afterImgRef = useRef<HTMLImageElement>(null);
+  const liveDragValueRef = useRef<{ panX: number; panY: number } | null>(null);
+  const rafIdRef = useRef<number | null>(null);
   const dragRef = useRef<
     | { mode: 'pan'; startX: number; startY: number; panX: number; panY: number; side: 'before' | 'after' }
     | { mode: 'slide'; startX: number; startPos: number }
@@ -133,9 +135,6 @@ export default function CompareSlider({
 
   // Live drag updates the DOM directly via refs (no React re-render) for
   // smoothness; the final value is committed to React state on pointer-up.
-  const liveDragValueRef = useRef<{ panX: number; panY: number } | null>(null);
-  const rafIdRef = useRef<number | null>(null);
-
   function applyDomTransform(side: 'before' | 'after', t: ImageTransform) {
     const img = side === 'before' ? beforeImgRef.current : afterImgRef.current;
     if (!img) return;
