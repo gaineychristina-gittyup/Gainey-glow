@@ -352,3 +352,87 @@ This is informational, not medical advice.`;
   const list: RecommendedProduct[] = Array.isArray(parsed?.recommendations) ? parsed.recommendations : [];
   return list.filter((r) => r && r.name && r.brand);
 }
+
+// ----- Free-form skincare Q&A ----------------------------------------------
+
+export interface AskContext {
+  question: string;
+  activeProducts: { name: string; brand?: string; step: string; concerns: string[]; ingredients: string[] }[];
+  sensitivities: string[];
+  recentTreatments: { name: string; date: string }[];
+  concernCoverage: { concern: string; productCount: number }[];
+}
+
+export async function askSkincareQuestion(ctx: AskContext): Promise<string> {
+  const key = getGeminiKey();
+  if (!key) throw new Error('No Gemini API key set. Add one in Settings.');
+  const model = getGeminiModel();
+
+  const lines: string[] = [];
+  lines.push(`User question: ${ctx.question}`);
+  lines.push('');
+  lines.push('Their current routine:');
+  if (ctx.activeProducts.length === 0) lines.push('- (no active products yet)');
+  ctx.activeProducts.forEach((p) => {
+    lines.push(
+      `- [${p.step}] ${p.name}${p.brand ? ' — ' + p.brand : ''}` +
+        (p.concerns.length ? ` · targets: ${p.concerns.join(', ')}` : '') +
+        (p.ingredients.length ? ` · key ingredients: ${p.ingredients.join(', ')}` : ''),
+    );
+  });
+  lines.push('');
+  lines.push('Concern coverage:');
+  ctx.concernCoverage.forEach((c) => {
+    lines.push(`- ${c.concern}: ${c.productCount} product${c.productCount === 1 ? '' : 's'}`);
+  });
+  if (ctx.sensitivities.length) {
+    lines.push('');
+    lines.push(`Personal sensitivities (avoid in any suggestion): ${ctx.sensitivities.join(', ')}`);
+  }
+  if (ctx.recentTreatments.length) {
+    lines.push('');
+    lines.push('Recent treatments:');
+    ctx.recentTreatments.forEach((t) => lines.push(`- ${t.date}: ${t.name}`));
+  }
+
+  const system = `You are an experienced, level-headed skincare assistant.
+Answer the user's question directly and concretely. Use their routine context above.
+- Be specific. Recommend by ingredient first (niacinamide, azelaic acid, etc.) then optionally by example product names.
+- Avoid suggesting anything that conflicts with their listed sensitivities.
+- Don't repeat products they already have unless adjusting how they use them.
+- Keep it under ~250 words. Use short paragraphs and small bullet lists when helpful.
+- Plain text only — no markdown headings, no code fences. This is informational, not medical advice.`;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model,
+  )}:generateContent?key=${encodeURIComponent(key)}`;
+
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: lines.join('\n') }] }],
+    systemInstruction: { parts: [{ text: system }] },
+    generationConfig: { temperature: 0.5 },
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = `Gemini request failed (${res.status})`;
+    try {
+      const j = JSON.parse(text);
+      if (j?.error?.message) msg = j.error.message;
+    } catch {
+      // keep default
+    }
+    if (res.status === 400 && /api key/i.test(msg)) msg = 'API key not valid. Check it in Settings.';
+    else if (res.status === 429) msg = 'Gemini rate limit reached. Wait a minute and try again.';
+    throw new Error(msg);
+  }
+  const json = await res.json();
+  const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Gemini returned no answer.');
+  return text.trim();
+}

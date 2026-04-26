@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
-import { Camera, Images, Layers, Sparkles, CalendarDays, FlaskConical, Settings } from 'lucide-react';
+import { Camera, Images, Layers, CalendarDays, FlaskConical, Settings } from 'lucide-react';
 import Today from './pages/Today';
 import Compare from './pages/Compare';
 import Products from './pages/Products';
-import Treatments from './pages/Treatments';
 import Timeline from './pages/Timeline';
 import Insights from './pages/Insights';
 import SettingsModal from './components/SettingsModal';
@@ -14,7 +13,6 @@ const NAV = [
   { to: '/', label: 'Today', icon: Camera, end: true },
   { to: '/compare', label: 'Compare', icon: Images },
   { to: '/products', label: 'Products', icon: FlaskConical },
-  { to: '/treatments', label: 'Treatments', icon: Sparkles },
   { to: '/timeline', label: 'Timeline', icon: CalendarDays },
   { to: '/insights', label: 'Insights', icon: Layers },
 ];
@@ -51,7 +49,6 @@ export default function App() {
           <Route path="/" element={<Today />} />
           <Route path="/compare" element={<Compare />} />
           <Route path="/products" element={<Products />} />
-          <Route path="/treatments" element={<Treatments />} />
           <Route path="/timeline" element={<Timeline />} />
           <Route path="/insights" element={<Insights />} />
         </Routes>

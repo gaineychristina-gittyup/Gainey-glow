@@ -1,6 +1,15 @@
 import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Camera, FlaskConical, Plus, Sparkles, CircleStop } from 'lucide-react';
+import {
+  CalendarClock,
+  Camera,
+  ChevronDown,
+  ChevronUp,
+  CircleStop,
+  FlaskConical,
+  Plus,
+  Sparkles,
+} from 'lucide-react';
 import {
   db,
   ZONES,
@@ -9,10 +18,11 @@ import {
   type PhotoEntry,
   type Treatment,
 } from '../db/schema';
+import { AFTERCARE } from '../data/aftercare';
 import { daysBetween, fmtDate, todayISO } from '../lib/date';
 import PhotoThumb from '../components/PhotoThumb';
 import PhotoViewer from '../components/PhotoViewer';
-import { TreatmentEditor } from './Treatments';
+import { TreatmentEditor, AftercareList } from '../components/TreatmentEditor';
 
 interface SinceTreatment {
   days: number;
@@ -23,13 +33,18 @@ type Event =
   | { kind: 'photo'; date: string; sortKey: number; photos: PhotoEntry[]; sinceTreatment?: SinceTreatment }
   | { kind: 'product-start'; date: string; sortKey: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
   | { kind: 'product-stop'; date: string; sortKey: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
-  | { kind: 'treatment'; date: string; sortKey: number; treatment: { type: string; customName?: string; provider?: string; notes?: string } };
+  | { kind: 'treatment'; date: string; sortKey: number; treatment: Treatment };
+
+type Filter = 'all' | 'photos' | 'products' | 'treatments';
 
 const NEW_TREATMENT: Treatment = { type: 'facial', date: todayISO() };
 
 export default function Timeline() {
   const [viewing, setViewing] = useState<PhotoEntry | null>(null);
   const [editingTreatment, setEditingTreatment] = useState<Treatment | null>(null);
+  const [filter, setFilter] = useState<Filter>('all');
+  const [compact, setCompact] = useState(false);
+
   const photos = useLiveQuery(() => db.photos.toArray(), []);
   const products = useLiveQuery(() => db.products.toArray(), []);
   const treatments = useLiveQuery(() => db.treatments.toArray(), []);
@@ -37,7 +52,6 @@ export default function Timeline() {
   const events: Event[] = useMemo(() => {
     const out: Event[] = [];
 
-    // Sort treatments ascending so we can find the most-recent-prior one quickly.
     const treatmentsAsc = [...(treatments ?? [])].sort((a, b) => a.date.localeCompare(b.date));
     const lastTreatmentBefore = (date: string): SinceTreatment | undefined => {
       let best: Treatment | undefined;
@@ -51,7 +65,6 @@ export default function Timeline() {
       return { days: daysBetween(best.date, date), name };
     };
 
-    // Group photos by date
     const photoMap = new Map<string, PhotoEntry[]>();
     (photos ?? []).forEach((p) => {
       const arr = photoMap.get(p.date) ?? [];
@@ -92,42 +105,143 @@ export default function Timeline() {
         kind: 'treatment',
         date: t.date,
         sortKey: dateKey(t.date) - 0.2,
-        treatment: { type: t.type, customName: t.customName, provider: t.provider, notes: t.notes },
+        treatment: t,
       });
     });
 
     return out.sort((a, b) => b.sortKey - a.sortKey);
   }, [photos, products, treatments]);
 
+  const filtered = useMemo(() => {
+    return events.filter((e) => {
+      if (filter === 'all') return true;
+      if (filter === 'photos') return e.kind === 'photo';
+      if (filter === 'treatments') return e.kind === 'treatment';
+      if (filter === 'products') return e.kind === 'product-start' || e.kind === 'product-stop';
+      return true;
+    });
+  }, [events, filter]);
+
+  const activeAftercare = useMemo(() => {
+    if (!treatments) return [];
+    const today = todayISO();
+    return treatments.filter((t) => {
+      const plan = AFTERCARE[t.type];
+      const elapsed = daysBetween(t.date, today);
+      return elapsed >= 0 && elapsed <= plan.durationDays;
+    });
+  }, [treatments]);
+
+  const filters: { id: Filter; label: string }[] = [
+    { id: 'all', label: 'All' },
+    { id: 'photos', label: 'Photos' },
+    { id: 'products', label: 'Products' },
+    { id: 'treatments', label: 'Treatments' },
+  ];
+
   return (
     <div className="space-y-4">
-      <section className="card flex items-start justify-between gap-2">
-        <div>
-          <h2 className="font-display text-xl text-glow-800">Timeline</h2>
-          <p className="text-xs text-glow-600">
-            Everything that's happened to your skin, in order.
-          </p>
+      <section className="card">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h2 className="font-display text-xl text-glow-800">Timeline</h2>
+            <p className="text-xs text-glow-600">
+              Everything that's happened to your skin, in order.
+            </p>
+          </div>
+          <button
+            className="btn-primary"
+            onClick={() => setEditingTreatment({ ...NEW_TREATMENT })}
+          >
+            <Plus size={16} /> Treatment
+          </button>
         </div>
-        <button
-          className="btn-primary"
-          onClick={() => setEditingTreatment({ ...NEW_TREATMENT })}
-        >
-          <Plus size={16} /> Treatment
-        </button>
+
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <div className="flex flex-wrap gap-1.5">
+            {filters.map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setFilter(f.id)}
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                  filter === f.id
+                    ? 'bg-glow-600 text-white border-glow-600'
+                    : 'bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setCompact((c) => !c)}
+            className="ml-auto inline-flex items-center gap-1 rounded-full border bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50 px-3 py-1 text-xs font-medium"
+            aria-label="Toggle compact view"
+          >
+            {compact ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+            {compact ? 'Expanded' : 'Compact'}
+          </button>
+        </div>
       </section>
 
-      {events.length === 0 ? (
+      {activeAftercare.length > 0 && (
+        <section className="card border-glow-300 bg-glow-50/80">
+          <div className="flex items-center gap-2 text-glow-800 font-display text-lg mb-2">
+            <CalendarClock size={18} /> Active aftercare
+          </div>
+          <div className="space-y-3">
+            {activeAftercare.map((t) => {
+              const plan = AFTERCARE[t.type];
+              const elapsed = daysBetween(t.date, todayISO());
+              const remaining = Math.max(0, plan.durationDays - elapsed);
+              return (
+                <div key={t.id} className="rounded-xl bg-white/80 p-3">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <button
+                      type="button"
+                      className="font-medium text-glow-900 hover:underline text-left"
+                      onClick={() => setEditingTreatment(t)}
+                    >
+                      {t.customName || TREATMENT_TYPES.find((x) => x.id === t.type)?.label}
+                    </button>
+                    <span className="text-[11px] text-glow-600 shrink-0">
+                      {remaining === 0
+                        ? 'last day'
+                        : `day ${elapsed + 1} of ${plan.durationDays + 1} · ${remaining}d left`}
+                    </span>
+                  </div>
+                  <p className="text-xs text-glow-700 mt-0.5">{plan.summary}</p>
+                  <AftercareList plan={plan} />
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {filtered.length === 0 ? (
         <div className="card text-sm text-glow-600/80">
-          Your timeline will fill in as you log photos, products, and treatments.
+          {events.length === 0
+            ? "Your timeline will fill in as you log photos, products, and treatments."
+            : 'No events match this filter.'}
         </div>
       ) : (
-        <div className="relative pl-6">
-          <div className="absolute left-2 top-2 bottom-2 w-px bg-glow-200" />
-          <ul className="space-y-4">
-            {events.map((e, i) => (
-              <li key={i} className="relative">
-                <span className="absolute -left-[18px] top-2 w-3 h-3 rounded-full bg-glow-500 ring-2 ring-rose-50" />
-                <TimelineCard event={e} onPhoto={setViewing} />
+        // The rail and dots share the same parent so they always line up.
+        <div className="relative">
+          <div className="absolute left-[14px] top-2 bottom-2 w-px bg-glow-200" />
+          <ul className={compact ? 'space-y-2' : 'space-y-4'}>
+            {filtered.map((e, i) => (
+              <li key={`${e.kind}-${e.date}-${i}`} className="relative pl-8">
+                <span
+                  className="absolute left-[10px] top-4 w-2.5 h-2.5 rounded-full bg-glow-500 ring-2 ring-rose-50"
+                  aria-hidden
+                />
+                <TimelineCard
+                  event={e}
+                  compact={compact}
+                  onPhoto={setViewing}
+                  onEditTreatment={setEditingTreatment}
+                />
               </li>
             ))}
           </ul>
@@ -159,20 +273,24 @@ export default function Timeline() {
 
 function TimelineCard({
   event,
+  compact,
   onPhoto,
+  onEditTreatment,
 }: {
   event: Event;
+  compact: boolean;
   onPhoto: (p: PhotoEntry) => void;
+  onEditTreatment: (t: Treatment) => void;
 }) {
   const since = event.kind === 'treatment' ? undefined : event.sinceTreatment;
   return (
-    <div className="card">
-      <div className="flex items-start justify-between gap-2 mb-2 flex-wrap">
+    <div className={compact ? 'card !py-2.5' : 'card'}>
+      <div className="flex items-start justify-between gap-2 flex-wrap">
         <div className="min-w-0">
           <div className="text-xs font-semibold uppercase tracking-wide text-glow-700">
             {fmtDate(event.date)}
           </div>
-          {since && (
+          {since && !compact && (
             <div className="text-[11px] text-glow-500 mt-0.5">
               {since.days === 0
                 ? `same day as ${since.name}`
@@ -182,7 +300,9 @@ function TimelineCard({
         </div>
         <Badge kind={event.kind} />
       </div>
-      <Body event={event} onPhoto={onPhoto} />
+      <div className={compact ? 'mt-1' : 'mt-2'}>
+        <Body event={event} compact={compact} onPhoto={onPhoto} onEditTreatment={onEditTreatment} />
+      </div>
     </div>
   );
 }
@@ -190,25 +310,53 @@ function TimelineCard({
 function Badge({ kind }: { kind: Event['kind'] }) {
   switch (kind) {
     case 'photo':
-      return <span className="chip"><Camera size={12} /> Photo</span>;
+      return (
+        <span className="chip">
+          <Camera size={12} /> Photo
+        </span>
+      );
     case 'product-start':
-      return <span className="chip"><FlaskConical size={12} /> Product started</span>;
+      return (
+        <span className="chip">
+          <FlaskConical size={12} /> Product started
+        </span>
+      );
     case 'product-stop':
-      return <span className="chip-warn"><CircleStop size={12} /> Product stopped</span>;
+      return (
+        <span className="chip-warn">
+          <CircleStop size={12} /> Product stopped
+        </span>
+      );
     case 'treatment':
-      return <span className="chip" style={{ background: '#fce7f3' }}><Sparkles size={12} /> Treatment</span>;
+      return (
+        <span className="chip" style={{ background: '#fce7f3' }}>
+          <Sparkles size={12} /> Treatment
+        </span>
+      );
   }
 }
 
 function Body({
   event,
+  compact,
   onPhoto,
+  onEditTreatment,
 }: {
   event: Event;
+  compact: boolean;
   onPhoto: (p: PhotoEntry) => void;
+  onEditTreatment: (t: Treatment) => void;
 }) {
   switch (event.kind) {
     case 'photo':
+      if (compact) {
+        return (
+          <div className="text-xs text-glow-700">
+            {event.photos.length} photo{event.photos.length === 1 ? '' : 's'} ·{' '}
+            {Array.from(new Set(event.photos.map((p) => ZONES.find((z) => z.id === p.zone)?.label ?? p.zone))).join(', ')}
+          </div>
+        );
+      }
       return (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {event.photos.map((p) => (
@@ -238,20 +386,57 @@ function Body({
         </div>
       );
     case 'treatment':
-      return (
-        <div className="text-sm">
-          <div className="font-medium text-glow-900">
-            {event.treatment.customName || TREATMENT_TYPES.find((x) => x.id === event.treatment.type)?.label}
-          </div>
-          {event.treatment.provider && (
-            <div className="text-xs text-glow-600">{event.treatment.provider}</div>
-          )}
-          {event.treatment.notes && (
-            <div className="text-xs text-glow-700 italic mt-1">{event.treatment.notes}</div>
-          )}
-        </div>
-      );
+      return <TreatmentBody treatment={event.treatment} compact={compact} onEdit={onEditTreatment} />;
   }
+}
+
+function TreatmentBody({
+  treatment,
+  compact,
+  onEdit,
+}: {
+  treatment: Treatment;
+  compact: boolean;
+  onEdit: (t: Treatment) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const plan = AFTERCARE[treatment.type];
+  const label =
+    treatment.customName || TREATMENT_TYPES.find((x) => x.id === treatment.type)?.label;
+  return (
+    <div className="text-sm">
+      <button
+        type="button"
+        className="font-medium text-glow-900 hover:underline text-left"
+        onClick={() => onEdit(treatment)}
+      >
+        {label}
+      </button>
+      {!compact && treatment.provider && (
+        <div className="text-xs text-glow-600">{treatment.provider}</div>
+      )}
+      {!compact && treatment.notes && (
+        <div className="text-xs text-glow-700 italic mt-1">{treatment.notes}</div>
+      )}
+      {!compact && (
+        <>
+          <button
+            type="button"
+            className="mt-2 text-[11px] font-semibold text-glow-700 underline"
+            onClick={() => setOpen((o) => !o)}
+          >
+            {open ? 'Hide aftercare' : 'Show aftercare'}
+          </button>
+          {open && (
+            <div className="mt-2 rounded-xl bg-glow-50 p-3 text-xs text-glow-800">
+              <p className="font-medium mb-1">{plan.summary}</p>
+              <AftercareList plan={plan} />
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 function dateKey(iso: string): number {
