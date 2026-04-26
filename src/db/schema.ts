@@ -141,12 +141,52 @@ export interface Profile {
   notes?: string;
 }
 
+export interface RoutineLog {
+  id?: number;
+  date: string;       // ISO date YYYY-MM-DD
+  productId: number;
+  period: 'am' | 'pm';
+}
+
+export type FeelTag =
+  | 'glowy'
+  | 'dull'
+  | 'hydrated'
+  | 'dehydrated'
+  | 'sensitive'
+  | 'poorSleep'
+  | 'breakout'
+  | 'oily'
+  | 'calm'
+  | 'irritated';
+
+export const FEEL_TAGS: { id: FeelTag; label: string; tone: 'good' | 'neutral' | 'bad' }[] = [
+  { id: 'glowy', label: 'Glowy', tone: 'good' },
+  { id: 'hydrated', label: 'Hydrated', tone: 'good' },
+  { id: 'calm', label: 'Calm', tone: 'good' },
+  { id: 'dull', label: 'Dull', tone: 'bad' },
+  { id: 'dehydrated', label: 'Dehydrated', tone: 'bad' },
+  { id: 'sensitive', label: 'Sensitive', tone: 'bad' },
+  { id: 'irritated', label: 'Irritated', tone: 'bad' },
+  { id: 'breakout', label: 'Breakout', tone: 'bad' },
+  { id: 'oily', label: 'Oily', tone: 'neutral' },
+  { id: 'poorSleep', label: 'Poor sleep', tone: 'neutral' },
+];
+
+export interface Checkin {
+  id?: number;
+  date: string;       // ISO date — unique
+  tags: FeelTag[];
+}
+
 class GaineyGlowDB extends Dexie {
   photos!: Table<PhotoEntry, number>;
   products!: Table<Product, number>;
   treatments!: Table<Treatment, number>;
   sensitivities!: Table<Sensitivity, number>;
   profile!: Table<Profile, string>;
+  routineLogs!: Table<RoutineLog, number>;
+  checkins!: Table<Checkin, number>;
 
   constructor() {
     super('gainey-glow');
@@ -156,6 +196,12 @@ class GaineyGlowDB extends Dexie {
       treatments: '++id, type, date',
       sensitivities: '++id, &ingredient',
       profile: 'id',
+    });
+    this.version(2).stores({
+      routineLogs: '++id, date, productId, [date+productId+period]',
+    });
+    this.version(3).stores({
+      checkins: '++id, &date',
     });
   }
 }

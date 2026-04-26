@@ -1,11 +1,13 @@
+import { useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
-import { Camera, Images, Layers, Sparkles, CalendarDays, FlaskConical } from 'lucide-react';
+import { Camera, Images, Layers, Sparkles, CalendarDays, FlaskConical, Settings } from 'lucide-react';
 import Today from './pages/Today';
 import Compare from './pages/Compare';
 import Products from './pages/Products';
 import Treatments from './pages/Treatments';
 import Timeline from './pages/Timeline';
 import Insights from './pages/Insights';
+import SettingsModal from './components/SettingsModal';
 
 const NAV = [
   { to: '/', label: 'Today', icon: Camera, end: true },
@@ -17,13 +19,23 @@ const NAV = [
 ];
 
 export default function App() {
+  const [showSettings, setShowSettings] = useState(false);
   return (
     <div className="min-h-full flex flex-col bg-gradient-to-b from-rose-50 via-pink-50 to-amber-50">
-      <header className="px-4 pt-6 pb-3 max-w-3xl w-full mx-auto">
-        <h1 className="font-display text-3xl text-glow-800 tracking-tight">
-          Gainey Glow <span className="text-glow-400">✦</span>
-        </h1>
-        <p className="text-sm text-glow-700/80">Your daily skin journal.</p>
+      <header className="px-4 pt-6 pb-3 max-w-3xl w-full mx-auto flex items-start justify-between">
+        <div>
+          <h1 className="font-display text-3xl text-glow-800 tracking-tight">
+            Gainey Glow <span className="text-glow-400">✦</span>
+          </h1>
+          <p className="text-sm text-glow-700/80">Your daily skin journal.</p>
+        </div>
+        <button
+          className="btn-ghost p-2 mt-1"
+          onClick={() => setShowSettings(true)}
+          aria-label="Settings"
+        >
+          <Settings size={20} />
+        </button>
       </header>
 
       <main className="flex-1 px-4 pb-28 max-w-3xl w-full mx-auto">
@@ -36,6 +48,8 @@ export default function App() {
           <Route path="/insights" element={<Insights />} />
         </Routes>
       </main>
+
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
 
       <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-glow-100 bg-white/90 backdrop-blur">
         <ul className="max-w-3xl mx-auto grid grid-cols-6">
