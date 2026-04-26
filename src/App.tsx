@@ -25,7 +25,7 @@ export default function App() {
       <header className="px-4 pt-6 pb-3 max-w-3xl w-full mx-auto flex items-start justify-between">
         <div>
           <h1 className="font-display text-3xl text-rose-50 tracking-tight drop-shadow-sm">
-            Gainey Glow <span className="text-glow-300">✦</span>
+            GaineyGlow <span className="text-glow-300">✦</span>
           </h1>
           <p className="text-sm text-rose-100/80">Your daily skin journal.</p>
         </div>

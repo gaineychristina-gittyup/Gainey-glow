@@ -1,4 +1,4 @@
-# Gainey Glow ✦
+# GaineyGlow ✦
 
 A private, offline-first skin journal. Capture daily photos, log products and
 treatments, and watch your skin change over time.
