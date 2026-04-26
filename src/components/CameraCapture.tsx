@@ -174,12 +174,19 @@ function ZoneGuide({ zone }: { zone: Zone }) {
 
   switch (zone) {
     case 'full':
-      // Centered face oval
+      // Large oval covering the whole face + nose vertical + eye horizontal
       return (
         <g fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray="2 1.5">
-          <ellipse cx="50" cy="70" rx="22" ry="32" />
-          <text x="50" y="135" textAnchor="middle" fill="white" fillOpacity="0.85" fontSize="3">
-            Center your face inside the oval
+          <ellipse cx="50" cy="68" rx="30" ry="42" />
+          {/* Vertical nose line — face should be split symmetrically by it */}
+          <line x1="50" y1="26" x2="50" y2="110" strokeDasharray="1.5 1" />
+          {/* Horizontal eye line — eyes sit on this line */}
+          <line x1="22" y1="58" x2="78" y2="58" strokeDasharray="1.5 1" />
+          <text x="50" y="22" textAnchor="middle" fill="white" fillOpacity="0.9" fontSize="3">
+            eye line
+          </text>
+          <text x="50" y="138" textAnchor="middle" fill="white" fillOpacity="0.85" fontSize="3">
+            Line up nose with the vertical line · eyes on the horizontal
           </text>
         </g>
       );
@@ -187,18 +194,20 @@ function ZoneGuide({ zone }: { zone: Zone }) {
       // Oval shifted right (face turned to show left side)
       return (
         <g fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray="2 1.5">
-          <ellipse cx="62" cy="70" rx="20" ry="30" />
-          <text x="50" y="135" textAnchor="middle" fill="white" fillOpacity="0.85" fontSize="3">
-            Turn head ¾ to the right
+          <ellipse cx="62" cy="68" rx="26" ry="38" />
+          <line x1="22" y1="58" x2="84" y2="58" strokeDasharray="1.5 1" />
+          <text x="50" y="138" textAnchor="middle" fill="white" fillOpacity="0.85" fontSize="3">
+            Turn head ¾ to the right · eyes on the line
           </text>
         </g>
       );
     case 'rightCheek':
       return (
         <g fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray="2 1.5">
-          <ellipse cx="38" cy="70" rx="20" ry="30" />
-          <text x="50" y="135" textAnchor="middle" fill="white" fillOpacity="0.85" fontSize="3">
-            Turn head ¾ to the left
+          <ellipse cx="38" cy="68" rx="26" ry="38" />
+          <line x1="16" y1="58" x2="78" y2="58" strokeDasharray="1.5 1" />
+          <text x="50" y="138" textAnchor="middle" fill="white" fillOpacity="0.85" fontSize="3">
+            Turn head ¾ to the left · eyes on the line
           </text>
         </g>
       );

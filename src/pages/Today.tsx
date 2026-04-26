@@ -1,13 +1,14 @@
 import { useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Camera, Check, Sun, Moon, Upload, Trash2 } from 'lucide-react';
-import { db, FEEL_TAGS, ZONES, type FeelTag, type Product, type Zone } from '../db/schema';
+import { Camera, Check, Sun, Moon, Upload } from 'lucide-react';
+import { db, FEEL_TAGS, ZONES, type FeelTag, type PhotoEntry, type Product, type Zone } from '../db/schema';
 import { todayISO, fmtDate, relDays, fmtDateShort } from '../lib/date';
 import { makeThumbnail } from '../lib/image';
 import ZonePicker from '../components/ZonePicker';
 import PhotoThumb from '../components/PhotoThumb';
 import CameraCapture from '../components/CameraCapture';
 import UploadReviewModal from '../components/UploadReviewModal';
+import PhotoViewer from '../components/PhotoViewer';
 
 interface UploadSummary {
   count: number;
@@ -24,6 +25,7 @@ export default function Today() {
   const [summary, setSummary] = useState<UploadSummary | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [reviewFiles, setReviewFiles] = useState<File[] | null>(null);
+  const [viewing, setViewing] = useState<PhotoEntry | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
 
   const photosToday = useLiveQuery(
@@ -176,6 +178,8 @@ export default function Today() {
         />
       )}
 
+      {viewing && <PhotoViewer photo={viewing} onClose={() => setViewing(null)} />}
+
       <FeelTagsSection date={date} />
 
       <section className="card">
@@ -190,20 +194,18 @@ export default function Today() {
                   <div className="text-xs font-semibold text-glow-700 mb-1.5">{z.label}</div>
                   <div className="grid grid-cols-3 gap-2">
                     {grouped[z.id]!.map((p) => (
-                      <div key={p.id} className="relative group">
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setViewing(p)}
+                        className="relative block focus:outline-none focus:ring-2 focus:ring-glow-500 rounded-xl"
+                      >
                         <PhotoThumb
                           blob={p.thumb}
                           alt={`${z.label} on ${p.date}`}
                           className="aspect-square w-full object-cover rounded-xl"
                         />
-                        <button
-                          onClick={() => db.photos.delete(p.id!)}
-                          aria-label="Delete photo"
-                          className="absolute top-1 right-1 bg-white/90 rounded-full p-1 opacity-0 group-hover:opacity-100 transition"
-                        >
-                          <Trash2 size={14} className="text-red-600" />
-                        </button>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </div>
