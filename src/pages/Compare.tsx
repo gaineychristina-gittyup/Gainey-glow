@@ -198,7 +198,7 @@ export default function Compare() {
             afterBlob={after.blob}
             beforeLabel={beforeLabel}
             afterLabel={afterLabel}
-            caption={caption.trim() || undefined}
+            caption={buildEmbeddedCaption(caption, beforeLabel, afterLabel) || undefined}
             state={sliderState}
             onStateChange={setSliderState}
           />

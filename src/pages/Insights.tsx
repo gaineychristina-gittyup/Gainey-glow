@@ -164,14 +164,21 @@ export default function Insights() {
   return (
     <div className="space-y-4">
       <section className="card">
-        <h2 className="font-display text-xl text-glow-800">Insights</h2>
-        <p className="text-xs text-glow-600">A snapshot of your active routine.</p>
+        <h2 className="font-display text-xl text-glow-800">Insights / AI</h2>
+        <p className="text-xs text-glow-600">A snapshot of your active routine plus AI guidance.</p>
         <div className="mt-3 grid grid-cols-3 gap-2 text-center">
           <Stat label="Active products" value={active.length} />
           <Stat label="Photo streak" value={photoStreak} suffix={photoStreak === 1 ? 'day' : 'days'} />
           <Stat label="Sensitivities" value={(sensitivities ?? []).length} />
         </div>
       </section>
+
+      <AskAiBox
+        active={active}
+        sensitivities={sensitivities ?? []}
+        treatments={treatments ?? []}
+        concernCounts={concernCounts}
+      />
 
       <section className="card">
         <h3 className="font-display text-lg text-glow-800 mb-2">Concern coverage</h3>
@@ -407,13 +414,6 @@ export default function Insights() {
           flaggedCount={flagged.length}
         />
       </section>
-
-      <AskAiBox
-        active={active}
-        sensitivities={sensitivities ?? []}
-        treatments={treatments ?? []}
-        concernCounts={concernCounts}
-      />
     </div>
   );
 }

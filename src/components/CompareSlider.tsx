@@ -51,6 +51,8 @@ export default function CompareSlider({
   const [after, setAfter] = useState<string>();
   const [internal, setInternal] = useState<CompareSliderState>(DEFAULT_COMPARE_STATE);
   const containerRef = useRef<HTMLDivElement>(null);
+  const beforeImgRef = useRef<HTMLImageElement>(null);
+  const afterImgRef = useRef<HTMLImageElement>(null);
   const dragRef = useRef<
     | { mode: 'pan'; startX: number; startY: number; panX: number; panY: number; side: 'before' | 'after' }
     | { mode: 'slide'; startX: number; startPos: number }
@@ -129,6 +131,17 @@ export default function CompareSlider({
     };
   }
 
+  // Live drag updates the DOM directly via refs (no React re-render) for
+  // smoothness; the final value is committed to React state on pointer-up.
+  const liveDragValueRef = useRef<{ panX: number; panY: number } | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+
+  function applyDomTransform(side: 'before' | 'after', t: ImageTransform) {
+    const img = side === 'before' ? beforeImgRef.current : afterImgRef.current;
+    if (!img) return;
+    img.style.transform = `translate3d(${t.panX}px, ${t.panY}px, 0) scale(${t.zoom})`;
+  }
+
   function onPointerMove(e: React.PointerEvent) {
     const d = dragRef.current;
     if (!d) return;
@@ -138,17 +151,35 @@ export default function CompareSlider({
       const w = el.clientWidth;
       const dx = e.clientX - d.startX;
       const next = Math.max(0, Math.min(100, d.startPos + (dx / w) * 100));
-      setPos(next);
+      // Slider uses CSS clip-path on the after image, which already has its own
+      // transform — we just need to push pos via state but keep it cheap.
+      if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = requestAnimationFrame(() => {
+        setPos(next);
+        rafIdRef.current = null;
+      });
       return;
     }
     const dx = e.clientX - d.startX;
     const dy = e.clientY - d.startY;
     const t = s[d.side];
-    const next = clampPan(t.zoom, d.panX + dx, d.panY + dy);
-    updateState({ ...s, [d.side]: { ...t, ...next } });
+    const clamped = clampPan(t.zoom, d.panX + dx, d.panY + dy);
+    liveDragValueRef.current = clamped;
+    // Update DOM immediately for smooth motion.
+    applyDomTransform(d.side, { ...t, ...clamped });
   }
 
   function onPointerUp() {
+    const d = dragRef.current;
+    if (d && d.mode === 'pan' && liveDragValueRef.current) {
+      const t = s[d.side];
+      updateState({ ...s, [d.side]: { ...t, ...liveDragValueRef.current } });
+    }
+    liveDragValueRef.current = null;
+    if (rafIdRef.current != null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
     dragRef.current = null;
   }
 
@@ -220,18 +251,21 @@ export default function CompareSlider({
             right of the slider via clip-path, so the convention is consistent
             with most before/after sliders. */}
         <img
+          ref={beforeImgRef}
           src={before}
           alt="before"
           className="block w-full h-auto"
           draggable={false}
-          style={beforeStyle}
+          style={{ ...beforeStyle, willChange: 'transform' }}
         />
         <img
+          ref={afterImgRef}
           src={after}
           alt="after"
           className="absolute inset-0 w-full h-full object-cover pointer-events-none"
           style={{
             ...afterStyle,
+            willChange: 'transform',
             clipPath: `inset(0 0 0 ${s.pos}%)`,
             WebkitClipPath: `inset(0 0 0 ${s.pos}%)`,
           }}
