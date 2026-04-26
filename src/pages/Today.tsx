@@ -393,25 +393,45 @@ function SkinRatingCard({ date }: { date: string }) {
     [date],
   );
   const persisted = rating?.rating ?? 0;
-  // Local mirror so the thumb moves instantly even before the Dexie
-  // round-trip — otherwise the controlled `value` prop briefly stays at
-  // the old number and the slider appears to land "in between".
+  const persistedNotes = rating?.notes ?? '';
   const [local, setLocal] = useState(persisted);
+  const [notesDraft, setNotesDraft] = useState(persistedNotes);
+  const [savedAt, setSavedAt] = useState(0);
   useEffect(() => {
     setLocal(persisted);
-  }, [persisted, date]);
+    setNotesDraft(persistedNotes);
+  }, [persisted, persistedNotes, date]);
 
-  async function commit(v: number) {
-    setLocal(v);
+  async function persist(v: number, notes: string) {
+    const trimmed = notes.trim();
     if (rating?.id) {
-      if (v === 0) await db.skinRatings.delete(rating.id);
-      else await db.skinRatings.update(rating.id, { rating: v });
-    } else if (v > 0) {
-      await db.skinRatings.add({ date, rating: v });
+      if (v === 0 && !trimmed) {
+        await db.skinRatings.delete(rating.id);
+      } else {
+        await db.skinRatings.update(rating.id, {
+          rating: v,
+          notes: trimmed || undefined,
+        });
+      }
+    } else if (v > 0 || trimmed) {
+      await db.skinRatings.add({ date, rating: v, notes: trimmed || undefined });
     }
   }
 
+  async function pickRating(v: number) {
+    setLocal(v);
+    await persist(v, notesDraft);
+  }
+
+  async function submitNotes() {
+    await persist(local, notesDraft);
+    setSavedAt(Date.now());
+    setTimeout(() => setSavedAt((s) => (Date.now() - s > 1500 ? 0 : s)), 1700);
+  }
+
   const labels = ['Awful', 'Meh', 'OK', 'Good', 'Glowing'];
+  const notesDirty = notesDraft.trim() !== persistedNotes.trim();
+
   return (
     <section className="card">
       <h3 className="font-display text-lg text-glow-800 mb-1">Skin rating</h3>
@@ -426,8 +446,8 @@ function SkinRatingCard({ date }: { date: string }) {
           step={1}
           value={local}
           onChange={(e) => setLocal(Math.round(Number(e.target.value)))}
-          onPointerUp={(e) => commit(Math.round(Number((e.target as HTMLInputElement).value)))}
-          onKeyUp={(e) => commit(Math.round(Number((e.target as HTMLInputElement).value)))}
+          onPointerUp={(e) => pickRating(Math.round(Number((e.target as HTMLInputElement).value)))}
+          onKeyUp={(e) => pickRating(Math.round(Number((e.target as HTMLInputElement).value)))}
           className="flex-1 accent-pink-500"
           aria-label="Skin rating, 0 to 5"
         />
@@ -440,7 +460,7 @@ function SkinRatingCard({ date }: { date: string }) {
           <button
             key={n}
             type="button"
-            onClick={() => commit(n)}
+            onClick={() => pickRating(n)}
             className={`rounded-full py-1 font-medium border transition ${
               n === local
                 ? 'bg-glow-600 text-white border-glow-600'
@@ -455,6 +475,27 @@ function SkinRatingCard({ date }: { date: string }) {
       {local > 0 && (
         <div className="mt-2 text-xs text-glow-700 italic">{labels[local - 1]}</div>
       )}
+
+      <label className="label mt-3">Notes</label>
+      <textarea
+        className="input min-h-[60px]"
+        placeholder="What's going on with your skin today? Breakouts, dryness, products tried, weather, sleep…"
+        value={notesDraft}
+        onChange={(e) => setNotesDraft(e.target.value)}
+      />
+      <div className="mt-2 flex items-center justify-end gap-2 text-[11px]">
+        {savedAt > 0 && Date.now() - savedAt < 1500 && (
+          <span className="text-emerald-700 font-medium">Saved ✓</span>
+        )}
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={submitNotes}
+          disabled={!notesDirty}
+        >
+          Save notes
+        </button>
+      </div>
     </section>
   );
 }
