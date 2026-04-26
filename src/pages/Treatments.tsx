@@ -181,7 +181,7 @@ function AftercareList({ plan }: { plan: typeof AFTERCARE[TreatmentType] }) {
   );
 }
 
-function TreatmentEditor({
+export function TreatmentEditor({
   initial,
   onClose,
   onSave,
