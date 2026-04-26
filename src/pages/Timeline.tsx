@@ -162,44 +162,45 @@ export default function Timeline() {
     <div className="space-y-4">
       <section className="card">
         <div className="flex items-start justify-between gap-2">
-          <div>
+          <div className="min-w-0">
             <h2 className="font-display text-xl text-glow-800">Timeline</h2>
             <p className="text-xs text-glow-600">
               Everything that's happened to your skin, in order.
             </p>
           </div>
-          <button
-            className="btn-primary"
-            onClick={() => setEditingTreatment({ ...NEW_TREATMENT })}
-          >
-            <Plus size={16} /> Treatment
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => setCompact((c) => !c)}
+              className="inline-flex items-center gap-1 rounded-full border bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50 px-3 py-1.5 text-xs font-medium"
+              aria-label="Toggle compact view"
+              title={compact ? 'Expand events' : 'Compact view'}
+            >
+              {compact ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+              {compact ? 'Expanded' : 'Compact'}
+            </button>
+            <button
+              className="btn-primary"
+              onClick={() => setEditingTreatment({ ...NEW_TREATMENT })}
+            >
+              <Plus size={16} /> Treatment
+            </button>
+          </div>
         </div>
 
-        <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <div className="flex flex-wrap gap-1.5">
-            {filters.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setFilter(f.id)}
-                className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                  filter === f.id
-                    ? 'bg-glow-600 text-white border-glow-600'
-                    : 'bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => setCompact((c) => !c)}
-            className="ml-auto inline-flex items-center gap-1 rounded-full border bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50 px-3 py-1 text-xs font-medium"
-            aria-label="Toggle compact view"
-          >
-            {compact ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
-            {compact ? 'Expanded' : 'Compact'}
-          </button>
+        <div className="mt-3 -mx-1 px-1 flex gap-1.5 overflow-x-auto pb-1">
+          {filters.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setFilter(f.id)}
+              className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${
+                filter === f.id
+                  ? 'bg-glow-600 text-white border-glow-600'
+                  : 'bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
       </section>
 

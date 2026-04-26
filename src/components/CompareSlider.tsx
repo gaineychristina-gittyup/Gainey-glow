@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { Minus, Plus, RotateCcw } from 'lucide-react';
 
-export interface CompareSliderState {
-  pos: number;
+export interface ImageTransform {
   zoom: number;
   panX: number;
   panY: number;
+}
+
+export interface CompareSliderState {
+  pos: number;
+  before: ImageTransform;
+  after: ImageTransform;
+  active: 'before' | 'after';
 }
 
 interface Props {
@@ -19,7 +25,17 @@ interface Props {
   controls?: boolean;
 }
 
-const DEFAULT_STATE: CompareSliderState = { pos: 50, zoom: 1, panX: 0, panY: 0 };
+const IDENTITY: ImageTransform = { zoom: 1, panX: 0, panY: 0 };
+
+export const DEFAULT_COMPARE_STATE: CompareSliderState = {
+  pos: 50,
+  before: { ...IDENTITY },
+  after: { ...IDENTITY },
+  active: 'after',
+};
+
+const ZMIN = 1;
+const ZMAX = 3;
 
 export default function CompareSlider({
   beforeBlob,
@@ -33,17 +49,22 @@ export default function CompareSlider({
 }: Props) {
   const [before, setBefore] = useState<string>();
   const [after, setAfter] = useState<string>();
-  const [internal, setInternal] = useState<CompareSliderState>(DEFAULT_STATE);
+  const [internal, setInternal] = useState<CompareSliderState>(DEFAULT_COMPARE_STATE);
   const containerRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
-  const pinchRef = useRef<{ d0: number; zoom: number } | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number; side: 'before' | 'after' } | null>(null);
+  const pinchRef = useRef<{ d0: number; zoom: number; side: 'before' | 'after' } | null>(null);
 
   const s = state ?? internal;
-  const update = (patch: Partial<CompareSliderState>) => {
-    const next = { ...s, ...patch };
+  const updateState = (next: CompareSliderState) => {
     if (onStateChange) onStateChange(next);
     else setInternal(next);
   };
+  const updateActive = (patch: Partial<ImageTransform>) => {
+    const t = { ...s[s.active], ...patch };
+    updateState({ ...s, [s.active]: t });
+  };
+  const setPos = (pos: number) => updateState({ ...s, pos });
+  const setActive = (active: 'before' | 'after') => updateState({ ...s, active });
 
   useEffect(() => {
     const a = URL.createObjectURL(beforeBlob);
@@ -58,14 +79,11 @@ export default function CompareSlider({
 
   if (!before || !after) return null;
 
-  const transform = `translate(${s.panX}px, ${s.panY}px) scale(${s.zoom})`;
-
   function clampPan(zoom: number, panX: number, panY: number) {
     const el = containerRef.current;
     if (!el) return { panX, panY };
     const w = el.clientWidth;
     const h = el.clientHeight;
-    // Allow the image to pan up to (zoom-1)*size/2 in each direction.
     const maxX = ((zoom - 1) * w) / 2;
     const maxY = ((zoom - 1) * h) / 2;
     return {
@@ -74,21 +92,39 @@ export default function CompareSlider({
     };
   }
 
+  // Decide which side a pointer event targets, based on the slider position.
+  function sideFromX(clientX: number): 'before' | 'after' {
+    const el = containerRef.current;
+    if (!el) return s.active;
+    const rect = el.getBoundingClientRect();
+    const xPct = ((clientX - rect.left) / rect.width) * 100;
+    return xPct < s.pos ? 'after' : 'before';
+  }
+
   function onPointerDown(e: React.PointerEvent) {
-    // Avoid hijacking the slider input and the zoom buttons.
     const target = e.target as HTMLElement;
     if (target.closest('input[type="range"]') || target.closest('button')) return;
-    if (s.zoom <= 1) return;
+    const side = sideFromX(e.clientX);
+    if (side !== s.active) setActive(side);
+    if (s[side].zoom <= 1) return;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-    dragRef.current = { startX: e.clientX, startY: e.clientY, panX: s.panX, panY: s.panY };
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      panX: s[side].panX,
+      panY: s[side].panY,
+      side,
+    };
   }
 
   function onPointerMove(e: React.PointerEvent) {
-    if (!dragRef.current) return;
-    const dx = e.clientX - dragRef.current.startX;
-    const dy = e.clientY - dragRef.current.startY;
-    const next = clampPan(s.zoom, dragRef.current.panX + dx, dragRef.current.panY + dy);
-    update(next);
+    const d = dragRef.current;
+    if (!d) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+    const t = s[d.side];
+    const next = clampPan(t.zoom, d.panX + dx, d.panY + dy);
+    updateState({ ...s, [d.side]: { ...t, ...next } });
   }
 
   function onPointerUp() {
@@ -96,34 +132,54 @@ export default function CompareSlider({
   }
 
   function onWheel(e: React.WheelEvent) {
-    if (!e.ctrlKey && !e.metaKey) return; // pinch-zoom on trackpad sends ctrl
+    if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
-    const next = Math.max(1, Math.min(3, s.zoom * (e.deltaY < 0 ? 1.1 : 0.9)));
-    update({ zoom: next, ...clampPan(next, s.panX, s.panY) });
+    const side = sideFromX(e.clientX);
+    if (side !== s.active) setActive(side);
+    const t = s[side];
+    const next = Math.max(ZMIN, Math.min(ZMAX, t.zoom * (e.deltaY < 0 ? 1.1 : 0.9)));
+    const clamped = clampPan(next, t.panX, t.panY);
+    updateState({ ...s, [side]: { zoom: next, ...clamped } });
   }
 
   function onTouchStart(e: React.TouchEvent) {
     if (e.touches.length !== 2) return;
+    e.preventDefault();
+    const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    const side = sideFromX(cx);
+    if (side !== s.active) setActive(side);
     const dx = e.touches[0].clientX - e.touches[1].clientX;
     const dy = e.touches[0].clientY - e.touches[1].clientY;
-    pinchRef.current = { d0: Math.hypot(dx, dy), zoom: s.zoom };
+    pinchRef.current = { d0: Math.hypot(dx, dy), zoom: s[side].zoom, side };
   }
   function onTouchMove(e: React.TouchEvent) {
     if (e.touches.length !== 2 || !pinchRef.current) return;
+    e.preventDefault();
     const dx = e.touches[0].clientX - e.touches[1].clientX;
     const dy = e.touches[0].clientY - e.touches[1].clientY;
     const d = Math.hypot(dx, dy);
-    const zoom = Math.max(1, Math.min(3, pinchRef.current.zoom * (d / pinchRef.current.d0)));
-    update({ zoom, ...clampPan(zoom, s.panX, s.panY) });
+    const z = Math.max(ZMIN, Math.min(ZMAX, pinchRef.current.zoom * (d / pinchRef.current.d0)));
+    const t = s[pinchRef.current.side];
+    const clamped = clampPan(z, t.panX, t.panY);
+    updateState({ ...s, [pinchRef.current.side]: { zoom: z, ...clamped } });
   }
   function onTouchEnd() {
     pinchRef.current = null;
   }
 
-  function setZoom(next: number) {
-    const z = Math.max(1, Math.min(3, next));
-    update({ zoom: z, ...clampPan(z, s.panX, s.panY) });
+  function setActiveZoom(next: number) {
+    const z = Math.max(ZMIN, Math.min(ZMAX, next));
+    const t = s[s.active];
+    const clamped = clampPan(z, t.panX, t.panY);
+    updateActive({ zoom: z, ...clamped });
   }
+  function resetActive() {
+    updateActive({ ...IDENTITY });
+  }
+
+  const beforeStyle = transformStyle(s.before);
+  const afterStyle = transformStyle(s.after);
+  const activeT = s[s.active];
 
   return (
     <div className="space-y-2">
@@ -144,7 +200,7 @@ export default function CompareSlider({
           alt="before"
           className="block w-full h-auto"
           draggable={false}
-          style={{ transform, transformOrigin: 'center center' }}
+          style={beforeStyle}
         />
         <div
           className="absolute inset-0 overflow-hidden pointer-events-none"
@@ -156,8 +212,7 @@ export default function CompareSlider({
             className="block h-full w-auto max-w-none object-cover"
             style={{
               width: `${10000 / s.pos}%`,
-              transform,
-              transformOrigin: 'center center',
+              ...afterStyle,
             }}
             draggable={false}
           />
@@ -171,17 +226,25 @@ export default function CompareSlider({
           min={0}
           max={100}
           value={s.pos}
-          onChange={(e) => update({ pos: Number(e.target.value) })}
+          onChange={(e) => setPos(Number(e.target.value))}
           className="slider-handle absolute inset-0 w-full h-full cursor-ew-resize"
           aria-label="Compare slider"
         />
         {beforeLabel && (
-          <span className="absolute top-2 left-2 chip bg-white/90 text-glow-800 pointer-events-none">
+          <span
+            className={`absolute top-2 left-2 chip pointer-events-none ${
+              s.active === 'before' ? 'bg-glow-600 text-white' : 'bg-white/90 text-glow-800'
+            }`}
+          >
             {beforeLabel}
           </span>
         )}
         {afterLabel && (
-          <span className="absolute top-2 right-2 chip bg-white/90 text-glow-800 pointer-events-none">
+          <span
+            className={`absolute top-2 right-2 chip pointer-events-none ${
+              s.active === 'after' ? 'bg-glow-600 text-white' : 'bg-white/90 text-glow-800'
+            }`}
+          >
             {afterLabel}
           </span>
         )}
@@ -198,41 +261,72 @@ export default function CompareSlider({
       </div>
 
       {controls && (
-        <div className="flex items-center gap-2 text-xs text-glow-700">
-          <button
-            type="button"
-            className="btn-ghost p-1.5"
-            onClick={() => setZoom(s.zoom - 0.25)}
-            disabled={s.zoom <= 1}
-            aria-label="Zoom out"
-          >
-            <Minus size={14} />
-          </button>
-          <span className="tabular-nums w-12 text-center">{s.zoom.toFixed(2)}×</span>
-          <button
-            type="button"
-            className="btn-ghost p-1.5"
-            onClick={() => setZoom(s.zoom + 0.25)}
-            aria-label="Zoom in"
-          >
-            <Plus size={14} />
-          </button>
-          <button
-            type="button"
-            className="btn-ghost p-1.5 ml-auto"
-            onClick={() => update({ ...DEFAULT_STATE, pos: s.pos })}
-            disabled={s.zoom === 1 && s.panX === 0 && s.panY === 0}
-            aria-label="Reset zoom and pan"
-          >
-            <RotateCcw size={14} /> Reset
-          </button>
-        </div>
-      )}
-      {controls && s.zoom > 1 && (
-        <p className="text-[11px] text-glow-500">
-          Drag to pan · pinch or ⌘/Ctrl + scroll to zoom.
-        </p>
+        <>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-glow-600">Adjust</span>
+            <div className="inline-flex rounded-full border border-glow-200 overflow-hidden">
+              {(['before', 'after'] as const).map((side) => (
+                <button
+                  key={side}
+                  type="button"
+                  onClick={() => setActive(side)}
+                  className={`px-3 py-1 text-xs font-medium transition ${
+                    s.active === side
+                      ? 'bg-glow-600 text-white'
+                      : 'bg-white text-glow-700 hover:bg-glow-50'
+                  }`}
+                >
+                  {side === 'before' ? 'Before' : 'After'}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1 ml-auto text-xs text-glow-700">
+              <button
+                type="button"
+                className="btn-ghost p-1.5"
+                onClick={() => setActiveZoom(activeT.zoom - 0.25)}
+                disabled={activeT.zoom <= ZMIN}
+                aria-label="Zoom out"
+              >
+                <Minus size={14} />
+              </button>
+              <span className="tabular-nums w-12 text-center">{activeT.zoom.toFixed(2)}×</span>
+              <button
+                type="button"
+                className="btn-ghost p-1.5"
+                onClick={() => setActiveZoom(activeT.zoom + 0.25)}
+                disabled={activeT.zoom >= ZMAX}
+                aria-label="Zoom in"
+              >
+                <Plus size={14} />
+              </button>
+              <button
+                type="button"
+                className="btn-ghost p-1.5"
+                onClick={resetActive}
+                disabled={
+                  activeT.zoom === 1 && activeT.panX === 0 && activeT.panY === 0
+                }
+                aria-label="Reset this side"
+                title="Reset this side"
+              >
+                <RotateCcw size={14} />
+              </button>
+            </div>
+          </div>
+          <p className="text-[11px] text-glow-500">
+            Pan/zoom only affects the side selected above. Drag to pan, pinch or
+            ⌘/Ctrl + scroll to zoom. Tapping a side selects it automatically.
+          </p>
+        </>
       )}
     </div>
   );
+}
+
+function transformStyle(t: ImageTransform): React.CSSProperties {
+  return {
+    transform: `translate(${t.panX}px, ${t.panY}px) scale(${t.zoom})`,
+    transformOrigin: 'center center',
+  };
 }

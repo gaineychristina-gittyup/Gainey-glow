@@ -67,7 +67,7 @@ export default function App() {
                 to={to}
                 end={end}
                 className={({ isActive }) =>
-                  `flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] ${
+                  `w-full flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] ${
                     isActive ? 'text-glow-700' : 'text-glow-400 hover:text-glow-600'
                   }`
                 }

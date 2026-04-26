@@ -11,7 +11,7 @@ import {
 } from '../db/schema';
 import ZonePicker from '../components/ZonePicker';
 import PhotoThumb from '../components/PhotoThumb';
-import CompareSlider, { type CompareSliderState } from '../components/CompareSlider';
+import CompareSlider, { DEFAULT_COMPARE_STATE, type CompareSliderState } from '../components/CompareSlider';
 import PhotoViewer from '../components/PhotoViewer';
 import { daysBetween, fmtDate, fmtDateShort, todayISO } from '../lib/date';
 import { renderComparisonPreview } from '../lib/comparison';
@@ -31,12 +31,7 @@ export default function Compare() {
   const [viewing, setViewing] = useState<PhotoEntry | null>(null);
   const [caption, setCaption] = useState('');
   const [referenceKey, setReferenceKey] = useState<string>('date');
-  const [sliderState, setSliderState] = useState<CompareSliderState>({
-    pos: 50,
-    zoom: 1,
-    panX: 0,
-    panY: 0,
-  });
+  const [sliderState, setSliderState] = useState<CompareSliderState>(DEFAULT_COMPARE_STATE);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   const photos = useLiveQuery(() => db.photos.where('zone').equals(zone).toArray(), [zone]);
@@ -109,6 +104,8 @@ export default function Compare() {
         after: after.blob,
         sliderPos: sliderState.pos,
         caption: buildEmbeddedCaption(caption, beforeLabel, afterLabel),
+        beforeTransform: sliderState.before,
+        afterTransform: sliderState.after,
       });
       const cmp: Comparison = {
         date: todayISO(),
@@ -118,6 +115,12 @@ export default function Compare() {
         zone,
         sliderPos: sliderState.pos,
         caption: caption.trim() || undefined,
+        beforeZoom: sliderState.before.zoom,
+        beforePanX: sliderState.before.panX,
+        beforePanY: sliderState.before.panY,
+        afterZoom: sliderState.after.zoom,
+        afterPanX: sliderState.after.panX,
+        afterPanY: sliderState.after.panY,
         referenceKind: reference?.kind,
         referenceId: reference?.id,
         referenceLabel: reference?.shortLabel,
@@ -143,7 +146,7 @@ export default function Compare() {
             setZone(z);
             setBeforeId(undefined);
             setAfterId(undefined);
-            setSliderState({ pos: 50, zoom: 1, panX: 0, panY: 0 });
+            setSliderState(DEFAULT_COMPARE_STATE);
           }}
         />
         <p className="text-[11px] text-glow-500 mt-2">
@@ -273,7 +276,7 @@ export default function Compare() {
                   } else {
                     setAfterId(p.id);
                   }
-                  setSliderState({ pos: 50, zoom: 1, panX: 0, panY: 0 });
+                  setSliderState(DEFAULT_COMPARE_STATE);
                 }}
                 onView={() => setViewing(p)}
               />
