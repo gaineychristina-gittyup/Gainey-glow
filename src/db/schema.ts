@@ -141,12 +141,20 @@ export interface Profile {
   notes?: string;
 }
 
+export interface RoutineLog {
+  id?: number;
+  date: string;       // ISO date YYYY-MM-DD
+  productId: number;
+  period: 'am' | 'pm';
+}
+
 class GaineyGlowDB extends Dexie {
   photos!: Table<PhotoEntry, number>;
   products!: Table<Product, number>;
   treatments!: Table<Treatment, number>;
   sensitivities!: Table<Sensitivity, number>;
   profile!: Table<Profile, string>;
+  routineLogs!: Table<RoutineLog, number>;
 
   constructor() {
     super('gainey-glow');
@@ -156,6 +164,9 @@ class GaineyGlowDB extends Dexie {
       treatments: '++id, type, date',
       sensitivities: '++id, &ingredient',
       profile: 'id',
+    });
+    this.version(2).stores({
+      routineLogs: '++id, date, productId, [date+productId+period]',
     });
   }
 }

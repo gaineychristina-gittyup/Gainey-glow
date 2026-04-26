@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { AlertTriangle, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Loader2, Pencil, Plus, ScanLine, Trash2, X } from 'lucide-react';
 import {
   CONCERNS,
   PRODUCT_STEPS,
@@ -15,6 +15,8 @@ import {
   findIrritant,
 } from '../data/ingredientReference';
 import { fmtDate, todayISO } from '../lib/date';
+import { scanProductImage } from '../lib/gemini';
+import { getGeminiKey } from '../lib/settings';
 import ChipMultiSelect from '../components/ChipMultiSelect';
 
 const blank: Product = {
@@ -31,12 +33,46 @@ const blank: Product = {
 export default function Products() {
   const [editing, setEditing] = useState<Product | null>(null);
   const [showSensitivity, setShowSensitivity] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const scanRef = useRef<HTMLInputElement>(null);
 
   const products = useLiveQuery(
     () => db.products.orderBy('startedOn').reverse().toArray(),
     [],
   );
   const sensitivities = useLiveQuery(() => db.sensitivities.toArray(), []);
+
+  async function handleScan(file: File | undefined) {
+    if (!file) return;
+    setScanError(null);
+    if (!getGeminiKey()) {
+      setScanError('Add your Gemini API key in Settings first (gear icon, top right).');
+      return;
+    }
+    setScanning(true);
+    try {
+      const result = await scanProductImage(file);
+      if (!result.name) {
+        setScanError("Couldn't recognize a product in that photo. Try the label or box.");
+        return;
+      }
+      setEditing({
+        ...blank,
+        name: result.name,
+        brand: result.brand ?? '',
+        step: result.step ?? blank.step,
+        concerns: result.concerns,
+        ingredients: result.ingredients,
+        notes: result.notes ?? '',
+      });
+    } catch (e) {
+      setScanError(e instanceof Error ? e.message : 'Scan failed');
+    } finally {
+      setScanning(false);
+      if (scanRef.current) scanRef.current.value = '';
+    }
+  }
 
   const userSensitiveSet = useMemo(
     () => new Set((sensitivities ?? []).map((s) => s.ingredient.toLowerCase())),
@@ -45,27 +81,51 @@ export default function Products() {
 
   return (
     <div className="space-y-4">
-      <section className="card flex items-center justify-between">
-        <div>
-          <h2 className="font-display text-xl text-glow-800">Products</h2>
-          <p className="text-xs text-glow-600">
-            Track every step in your routine and what it targets.
+      <section className="card">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h2 className="font-display text-xl text-glow-800">Products</h2>
+            <p className="text-xs text-glow-600">
+              Track every step in your routine and what it targets.
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap justify-end">
+            <button
+              className="btn-soft"
+              onClick={() => setShowSensitivity(true)}
+            >
+              Sensitivities
+            </button>
+            <button
+              className="btn-soft"
+              onClick={() => scanRef.current?.click()}
+              disabled={scanning}
+            >
+              {scanning ? <Loader2 size={16} className="animate-spin" /> : <ScanLine size={16} />}
+              {scanning ? 'Scanning' : 'Scan'}
+            </button>
+            <button
+              className="btn-primary"
+              onClick={() => setEditing({ ...blank })}
+              disabled={scanning}
+            >
+              <Plus size={16} /> Add
+            </button>
+          </div>
+        </div>
+        <input
+          ref={scanRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={(e) => handleScan(e.target.files?.[0])}
+        />
+        {scanError && (
+          <p className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+            {scanError}
           </p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            className="btn-soft"
-            onClick={() => setShowSensitivity(true)}
-          >
-            Sensitivities
-          </button>
-          <button
-            className="btn-primary"
-            onClick={() => setEditing({ ...blank })}
-          >
-            <Plus size={16} /> Add
-          </button>
-        </div>
+        )}
       </section>
 
       {(products?.length ?? 0) === 0 ? (
