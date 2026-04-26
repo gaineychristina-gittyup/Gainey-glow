@@ -179,6 +179,24 @@ export interface Checkin {
   tags: FeelTag[];
 }
 
+export interface Comparison {
+  id?: number;
+  date: string;            // when the user saved it (ISO)
+  savedAt: number;
+  beforePhotoId: number;
+  afterPhotoId: number;
+  zone: Zone;
+  sliderPos: number;       // 0–100, where the divider sat at save time
+  caption?: string;
+  // Reference: a product or treatment used as the "anchor" for the date labels.
+  referenceKind?: 'product' | 'treatment';
+  referenceId?: number;
+  referenceLabel?: string; // e.g. "Pico" — denormalized so deletion of the
+                           // referenced item doesn't break old comparisons.
+  referenceDate?: string;  // ISO date of the referenced event
+  preview: Blob;           // ~600px wide JPEG snapshot for Timeline
+}
+
 class GaineyGlowDB extends Dexie {
   photos!: Table<PhotoEntry, number>;
   products!: Table<Product, number>;
@@ -187,6 +205,7 @@ class GaineyGlowDB extends Dexie {
   profile!: Table<Profile, string>;
   routineLogs!: Table<RoutineLog, number>;
   checkins!: Table<Checkin, number>;
+  comparisons!: Table<Comparison, number>;
 
   constructor() {
     super('gainey-glow');
@@ -202,6 +221,9 @@ class GaineyGlowDB extends Dexie {
     });
     this.version(3).stores({
       checkins: '++id, &date',
+    });
+    this.version(4).stores({
+      comparisons: '++id, date, savedAt',
     });
   }
 }

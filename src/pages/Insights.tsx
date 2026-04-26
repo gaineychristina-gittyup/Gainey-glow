@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { AlertTriangle, Loader2, Send, Sparkles, Wand2 } from 'lucide-react';
+import { AlertTriangle, Beaker, Loader2, Send, Sparkles, Wand2 } from 'lucide-react';
 import { CONCERNS, db, type Concern } from '../db/schema';
 import { COMMON_IRRITANTS, findIngredientInfo, findIrritant } from '../data/ingredientReference';
 import { todayISO } from '../lib/date';
@@ -53,6 +53,32 @@ export default function Insights() {
       });
     });
     return out;
+  }, [active, sensitiveSet]);
+
+  const ingredientFrequency = useMemo(() => {
+    const map = new Map<string, { products: string[]; severity: 'sensitivity' | 'irritant' | 'caution' | 'ok' }>();
+    active.forEach((p) => {
+      p.ingredients.forEach((raw) => {
+        const i = raw.toLowerCase().trim();
+        if (!i) return;
+        const entry = map.get(i) ?? { products: [], severity: 'ok' as const };
+        entry.products.push(p.name);
+        if (sensitiveSet.has(i)) entry.severity = 'sensitivity';
+        else if (entry.severity !== 'sensitivity') {
+          if (findIrritant(i)) entry.severity = 'irritant';
+          else if (entry.severity === 'ok' && findIngredientInfo(i)?.cautions?.length) entry.severity = 'caution';
+        }
+        map.set(i, entry);
+      });
+    });
+    return Array.from(map.entries())
+      .map(([ingredient, v]) => ({
+        ingredient,
+        count: v.products.length,
+        products: v.products,
+        severity: v.severity,
+      }))
+      .sort((a, b) => b.count - a.count || a.ingredient.localeCompare(b.ingredient));
   }, [active, sensitiveSet]);
 
   const photoStreak = useMemo(() => computeStreak(photos ?? []), [photos]);
@@ -130,6 +156,46 @@ export default function Insights() {
             ))}
           </div>
         </details>
+      </section>
+
+      <section className="card">
+        <h3 className="font-display text-lg text-glow-800 mb-2 flex items-center gap-1.5">
+          <Beaker size={16} className="text-glow-700" /> Key ingredients
+        </h3>
+        <p className="text-xs text-glow-600 mb-3">
+          Every key ingredient across your active routine and how many products contain it.
+          High counts increase the risk of sensitivity from layering — and ingredients you've
+          flagged or that we know are common irritants are highlighted.
+        </p>
+        {ingredientFrequency.length === 0 ? (
+          <p className="text-sm text-glow-600/80">
+            Add ingredients to your products to see this breakdown.
+          </p>
+        ) : (
+          <ul className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
+            {ingredientFrequency.map((row) => {
+              const chipClass =
+                row.severity === 'sensitivity'
+                  ? 'chip-danger'
+                  : row.severity === 'irritant' || row.severity === 'caution'
+                  ? 'chip-warn'
+                  : 'chip';
+              const overlap = row.count >= 3;
+              return (
+                <li key={row.ingredient} className="flex items-baseline gap-2">
+                  <span className={`${chipClass} text-[11px]`}>{row.ingredient}</span>
+                  <span className={`text-xs ${overlap ? 'text-amber-700 font-semibold' : 'text-glow-600'}`}>
+                    in {row.count} product{row.count === 1 ? '' : 's'}
+                    {overlap ? ' · layering risk' : ''}
+                  </span>
+                  <span className="text-[11px] text-glow-500 truncate flex-1">
+                    {row.products.join(', ')}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
 
       <section className="card">
