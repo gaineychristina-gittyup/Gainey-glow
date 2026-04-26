@@ -21,16 +21,16 @@ const NAV = [
 export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   return (
-    <div className="min-h-full flex flex-col bg-gradient-to-b from-rose-50 via-pink-50 to-amber-50">
+    <div className="min-h-full flex flex-col bg-gradient-to-b from-[#b89888] via-[#8a6657] to-[#4a342d]">
       <header className="px-4 pt-6 pb-3 max-w-3xl w-full mx-auto flex items-start justify-between">
         <div>
-          <h1 className="font-display text-3xl text-glow-800 tracking-tight">
-            Gainey Glow <span className="text-glow-400">✦</span>
+          <h1 className="font-display text-3xl text-rose-50 tracking-tight drop-shadow-sm">
+            GaineyGlow <span className="text-glow-300">✦</span>
           </h1>
-          <p className="text-sm text-glow-700/80">Your daily skin journal.</p>
+          <p className="text-sm text-rose-100/80">Your daily skin journal.</p>
         </div>
         <button
-          className="btn-ghost p-2 mt-1"
+          className="p-2 mt-1 rounded-full text-rose-50 hover:bg-white/15 transition active:scale-95"
           onClick={() => setShowSettings(true)}
           aria-label="Settings"
         >
