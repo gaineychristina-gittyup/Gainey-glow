@@ -1,10 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useLocation } from 'react-router-dom';
-import { Camera, Check, ChevronLeft, ChevronRight, Plus, Sun, Moon, Upload } from 'lucide-react';
+import { Camera, Check, ChevronLeft, ChevronRight, GripVertical, Plus, Sparkles, Sun, Moon, Upload } from 'lucide-react';
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { db, ZONES, type PhotoEntry, type Product, type Zone } from '../db/schema';
 import { todayISO, fmtDate, relDays, fmtDateShort, shiftDate } from '../lib/date';
 import { makeThumbnail } from '../lib/image';
+import { askLayeringOrder } from '../lib/gemini';
+import { getGeminiKey } from '../lib/settings';
 import ZonePicker from '../components/ZonePicker';
 import PhotoThumb from '../components/PhotoThumb';
 import CameraCapture from '../components/CameraCapture';
@@ -313,6 +330,27 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
     () => db.routineLogs.where('date').equals(date).toArray(),
     [date],
   );
+  const [layeringFor, setLayeringFor] = useState<{
+    period: 'am' | 'pm';
+    list: Product[];
+  } | null>(null);
+
+  async function reorderRoutine(list: Product[], fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) return;
+    const next = [...list];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    const all = await db.products.toArray();
+    const orderMap = new Map<number, number>();
+    next.forEach((p, i) => orderMap.set(p.id!, i));
+    const updates = all.map((p) => ({
+      ...p,
+      sortOrder: orderMap.has(p.id!)
+        ? orderMap.get(p.id!)
+        : (p.sortOrder ?? 9999) + next.length,
+    }));
+    await db.products.bulkPut(updates);
+  }
 
   const isDone = (productId: number, period: 'am' | 'pm') =>
     !!logs?.find((l) => l.productId === productId && l.period === period);
@@ -398,7 +436,7 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
         <div className="h-full bg-glow-500 transition-all" style={{ width: `${pct}%` }} />
       </div>
 
-      <div className="grid sm:grid-cols-2 gap-3">
+      <div className="grid sm:grid-cols-2 gap-3 min-w-0">
         <RoutineColumn
           icon={<Sun size={16} className="text-amber-500" />}
           label="AM"
@@ -410,6 +448,8 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
           onAdd={async (id) => {
             await db.routineLogs.add({ date, productId: id, period: 'am' });
           }}
+          onReorder={(from, to) => reorderRoutine(am, from, to)}
+          onAskAi={() => setLayeringFor({ period: 'am', list: am })}
         />
         <RoutineColumn
           icon={<Moon size={16} className="text-indigo-500" />}
@@ -422,8 +462,34 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
           onAdd={async (id) => {
             await db.routineLogs.add({ date, productId: id, period: 'pm' });
           }}
+          onReorder={(from, to) => reorderRoutine(pm, from, to)}
+          onAskAi={() => setLayeringFor({ period: 'pm', list: pm })}
         />
       </div>
+
+      {layeringFor && (
+        <LayeringAdviceModal
+          period={layeringFor.period}
+          products={layeringFor.list}
+          onClose={() => setLayeringFor(null)}
+          onApplyOrder={async (orderedIds: number[]) => {
+            // Reassign sortOrder according to the new order; products not in
+            // the list keep their existing relative order at the end.
+            const all = await db.products.toArray();
+            const orderMap = new Map<number, number>();
+            orderedIds.forEach((id, i) => orderMap.set(id, i));
+            const updates = all
+              .map((p) => ({
+                ...p,
+                sortOrder: orderMap.has(p.id!)
+                  ? orderMap.get(p.id!)
+                  : (p.sortOrder ?? 9999) + orderedIds.length,
+              }));
+            await db.products.bulkPut(updates);
+            setLayeringFor(null);
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -438,6 +504,8 @@ function RoutineColumn({
   isAdHoc,
   candidates,
   onAdd,
+  onReorder,
+  onAskAi,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -447,55 +515,56 @@ function RoutineColumn({
   isAdHoc: (productId: number) => boolean;
   candidates: Product[];
   onAdd: (productId: number) => Promise<void>;
+  onReorder: (fromIndex: number, toIndex: number) => void;
+  onAskAi: () => void;
 }) {
   const [adding, setAdding] = useState(false);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
+  );
+  const ids = products.map((p) => p.id!);
+
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const from = ids.indexOf(active.id as number);
+    const to = ids.indexOf(over.id as number);
+    if (from < 0 || to < 0) return;
+    onReorder(from, to);
+  }
 
   return (
-    <div>
+    <div className="min-w-0">
       <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-glow-700 mb-2">
         {icon} {label}
+        <button
+          type="button"
+          onClick={onAskAi}
+          className="ml-auto inline-flex items-center gap-1 rounded-full bg-glow-100 text-glow-800 px-2 py-0.5 text-[10px] font-medium hover:bg-glow-200"
+          title="Ask AI for the best layering order"
+        >
+          <Sparkles size={10} /> AI order
+        </button>
       </div>
       {products.length === 0 ? (
         <p className="text-xs text-glow-500">No {label.toLowerCase()} products scheduled.</p>
       ) : (
-        <ul className="space-y-1.5">
-          {products.map((p) => {
-            const done = isDone(p.id!);
-            const adHoc = isAdHoc(p.id!);
-            return (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  onClick={() => onToggle(p.id!)}
-                  className={`w-full flex items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition ${
-                    done
-                      ? 'bg-glow-100 border-glow-300 text-glow-900'
-                      : 'bg-white border-glow-200 text-glow-800 hover:bg-glow-50'
-                  } ${adHoc ? 'border-dashed' : ''}`}
-                >
-                  <span
-                    className={`flex h-5 w-5 items-center justify-center rounded-md border ${
-                      done ? 'bg-glow-600 border-glow-600 text-white' : 'border-glow-300 bg-white'
-                    }`}
-                    aria-hidden
-                  >
-                    {done && <Check size={14} />}
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className={`block truncate font-medium ${done ? 'line-through opacity-70' : ''}`}>
-                      {p.name}
-                    </span>
-                    <span className="block text-[11px] text-glow-500 truncate">
-                      {p.brand}
-                      {p.brand && adHoc ? ' · ' : ''}
-                      {adHoc && <span className="text-glow-700">ad-hoc</span>}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+            <ul className="space-y-1.5">
+              {products.map((p) => (
+                <SortableRoutineRow
+                  key={p.id}
+                  product={p}
+                  done={isDone(p.id!)}
+                  adHoc={isAdHoc(p.id!)}
+                  onToggle={() => onToggle(p.id!)}
+                />
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
       )}
 
       <button
@@ -545,6 +614,192 @@ function RoutineColumn({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function SortableRoutineRow({
+  product,
+  done,
+  adHoc,
+  onToggle,
+}: {
+  product: Product;
+  done: boolean;
+  adHoc: boolean;
+  onToggle: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: product.id!,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+  return (
+    <li ref={setNodeRef} style={style}>
+      <div
+        className={`w-full flex items-center gap-1 rounded-xl border px-2 py-2 text-left text-sm ${
+          done
+            ? 'bg-glow-100 border-glow-300 text-glow-900'
+            : 'bg-white border-glow-200 text-glow-800'
+        } ${adHoc ? 'border-dashed' : ''}`}
+      >
+        <span
+          {...attributes}
+          {...listeners}
+          aria-label="Drag to reorder"
+          className="p-1 rounded-md text-glow-400 hover:text-glow-700 hover:bg-glow-100 cursor-grab active:cursor-grabbing touch-none shrink-0"
+        >
+          <GripVertical size={14} />
+        </span>
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-2 flex-1 min-w-0 text-left"
+        >
+          <span
+            className={`flex h-5 w-5 items-center justify-center rounded-md border shrink-0 ${
+              done ? 'bg-glow-600 border-glow-600 text-white' : 'border-glow-300 bg-white'
+            }`}
+            aria-hidden
+          >
+            {done && <Check size={14} />}
+          </span>
+          <span className="flex-1 min-w-0 overflow-hidden">
+            <span className={`block truncate font-medium ${done ? 'line-through opacity-70' : ''}`}>
+              {product.name}
+            </span>
+            <span className="block text-[11px] text-glow-500 truncate">
+              {product.brand}
+              {product.brand && adHoc ? ' · ' : ''}
+              {adHoc && <span className="text-glow-700">ad-hoc</span>}
+            </span>
+          </span>
+        </button>
+      </div>
+    </li>
+  );
+}
+
+
+function LayeringAdviceModal({
+  period,
+  products,
+  onClose,
+  onApplyOrder,
+}: {
+  period: 'am' | 'pm';
+  products: Product[];
+  onClose: () => void;
+  onApplyOrder: (orderedIds: number[]) => Promise<void>;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [plan, setPlan] = useState<import('../lib/gemini').LayeringPlan | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (!getGeminiKey()) {
+        setError('Add your Gemini API key in Settings first (gear icon, top right).');
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await askLayeringOrder({
+          period,
+          products: products.map((p) => ({
+            id: p.id!,
+            name: p.name,
+            brand: p.brand,
+            step: p.step,
+            ingredients: p.ingredients,
+          })),
+        });
+        if (!cancelled) setPlan(result);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to get plan.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/40 p-3">
+      <div className="card w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-display text-lg text-glow-800 flex items-center gap-1.5">
+            <Sparkles size={16} className="text-glow-600" /> {period.toUpperCase()} layering
+          </h3>
+          <button className="btn-ghost text-xs" onClick={onClose}>Close</button>
+        </div>
+        <p className="text-xs text-glow-600 mb-3">
+          AI suggested order, with wait times between steps. Informational only.
+        </p>
+        {loading && (
+          <div className="text-sm text-glow-700 py-6 text-center">Asking Gemini…</div>
+        )}
+        {error && (
+          <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-800">
+            {error}
+          </div>
+        )}
+        {plan && (
+          <ol className="space-y-2 list-decimal pl-5">
+            {plan.order.map((step) => {
+              const p = products.find((x) => x.id === step.productId);
+              if (!p) return null;
+              return (
+                <li key={step.productId}>
+                  <div className="text-sm font-medium text-glow-900">
+                    {p.brand ? <span className="font-bold">{p.brand} </span> : null}
+                    {p.name}
+                  </div>
+                  <div className="text-xs text-glow-700">{step.reason}</div>
+                  {step.waitMinutesAfter > 0 && (
+                    <div className="text-[11px] text-amber-700 mt-0.5">
+                      wait {step.waitMinutesAfter} min before next step
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+        {plan && plan.notes.length > 0 && (
+          <div className="mt-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-glow-700 mb-1">
+              Notes
+            </div>
+            <ul className="list-disc pl-4 text-xs text-glow-800 space-y-0.5">
+              {plan.notes.map((n, i) => (
+                <li key={i}>{n}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          {plan && (
+            <button
+              className="btn-primary"
+              onClick={() => onApplyOrder(plan.order.map((s) => s.productId))}
+            >
+              Apply this order
+            </button>
+          )}
+          <button className="btn-ghost" onClick={onClose}>Done</button>
+        </div>
+      </div>
     </div>
   );
 }

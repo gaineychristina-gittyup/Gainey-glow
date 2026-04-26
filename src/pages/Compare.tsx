@@ -12,7 +12,7 @@ import {
 } from '../db/schema';
 import ZonePicker from '../components/ZonePicker';
 import PhotoThumb from '../components/PhotoThumb';
-import CompareSlider, { DEFAULT_COMPARE_STATE, type CompareSliderState } from '../components/CompareSlider';
+import CompareSlider from '../components/CompareSlider';
 import PhotoViewer from '../components/PhotoViewer';
 import { daysBetween, fmtDate, fmtDateShort, todayISO } from '../lib/date';
 import { renderComparisonPreview } from '../lib/comparison';
@@ -46,7 +46,6 @@ export default function Compare() {
   const [pickerRole, setPickerRole] = useState<'before' | 'after' | null>(null);
   const [caption, setCaption] = useState('');
   const [referenceKey, setReferenceKey] = useState<string>('date');
-  const [sliderState, setSliderState] = useState<CompareSliderState>(DEFAULT_COMPARE_STATE);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   const photos = useLiveQuery(() => db.photos.where('zone').equals(zone).toArray(), [zone]);
@@ -117,10 +116,9 @@ export default function Compare() {
       const preview = await renderComparisonPreview({
         before: before.blob,
         after: after.blob,
-        sliderPos: sliderState.pos,
-        caption: buildEmbeddedCaption(caption, beforeLabel, afterLabel),
-        beforeTransform: sliderState.before,
-        afterTransform: sliderState.after,
+        beforeLabel: stripPrefix(beforeLabel),
+        afterLabel: stripPrefix(afterLabel),
+        caption: caption.trim() || undefined,
       });
       const cmp: Comparison = {
         date: todayISO(),
@@ -128,14 +126,8 @@ export default function Compare() {
         beforePhotoId: before.id,
         afterPhotoId: after.id,
         zone,
-        sliderPos: sliderState.pos,
+        sliderPos: 50,
         caption: caption.trim() || undefined,
-        beforeZoom: sliderState.before.zoom,
-        beforePanX: sliderState.before.panX,
-        beforePanY: sliderState.before.panY,
-        afterZoom: sliderState.after.zoom,
-        afterPanX: sliderState.after.panX,
-        afterPanY: sliderState.after.panY,
         referenceKind: reference?.kind,
         referenceId: reference?.id,
         referenceLabel: reference?.shortLabel,
@@ -161,7 +153,6 @@ export default function Compare() {
             setZone(z);
             setBeforeId(undefined);
             setAfterId(undefined);
-            setSliderState(DEFAULT_COMPARE_STATE);
           }}
         />
         <p className="text-[11px] text-glow-500 mt-2">
@@ -181,12 +172,6 @@ export default function Compare() {
                 const a = afterId ?? after.id;
                 setBeforeId(a);
                 setAfterId(b);
-                setSliderState((s) => ({
-                  ...s,
-                  before: s.after,
-                  after: s.before,
-                  active: s.active === 'before' ? 'after' : 'before',
-                }));
               }}
               aria-label="Swap Before and After"
             >
@@ -198,9 +183,7 @@ export default function Compare() {
             afterBlob={after.blob}
             beforeLabel={beforeLabel}
             afterLabel={afterLabel}
-            caption={buildEmbeddedCaption(caption, beforeLabel, afterLabel) || undefined}
-            state={sliderState}
-            onStateChange={setSliderState}
+            caption={caption.trim() || undefined}
           />
 
           <div className="grid sm:grid-cols-2 gap-3">
@@ -331,7 +314,6 @@ export default function Compare() {
               if ((before?.id ?? -1) === p.id) setBeforeId(undefined);
               setAfterId(p.id);
             }
-            setSliderState(DEFAULT_COMPARE_STATE);
             setPickerRole(null);
           }}
           onClose={() => setPickerRole(null)}
@@ -493,13 +475,6 @@ function refLabel(ref: ReferencePoint, photoDate?: string): string {
   const d = daysBetween(ref.date, photoDate);
   if (d === 0) return `${ref.shortLabel} day 0`;
   return `${ref.shortLabel} ${d > 0 ? '+' : ''}${d}d`;
-}
-
-function buildEmbeddedCaption(custom: string, beforeLabel: string, afterLabel: string): string {
-  const parts = [custom.trim(), `${stripPrefix(beforeLabel)} → ${stripPrefix(afterLabel)}`].filter(
-    Boolean,
-  );
-  return parts.join(' · ');
 }
 
 function stripPrefix(s: string): string {

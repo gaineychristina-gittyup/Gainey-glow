@@ -1,7 +1,7 @@
-// Render a saved-comparison preview to a JPEG blob, sized for Timeline.
-// The preview shows the before image with the after image clipped to the
-// left of the slider position, plus an optional caption at the bottom.
-// Each image can carry its own zoom/pan transform (matching the live UI).
+// Render a side-by-side comparison preview to a JPEG blob, sized for
+// Timeline. Before on the left, After on the right, each labeled with its
+// (typically date-based) caption, with an optional combined caption strip
+// at the bottom.
 
 import { loadImage } from './image';
 
@@ -11,120 +11,136 @@ export interface PreviewTransform {
   panY: number;
 }
 
-const IDENTITY: PreviewTransform = { zoom: 1, panX: 0, panY: 0 };
-
 export async function renderComparisonPreview(opts: {
   before: Blob;
   after: Blob;
-  sliderPos: number;     // 0-100
   caption?: string;
+  beforeLabel?: string;
+  afterLabel?: string;
   maxWidth?: number;
+  // The following fields are accepted for backwards compatibility with
+  // older call sites but unused by the side-by-side renderer.
+  sliderPos?: number;
   beforeTransform?: PreviewTransform;
   afterTransform?: PreviewTransform;
-  // The pixel size of the live slider, used to scale pan offsets to the
-  // preview canvas correctly. Optional — falls back to canvas width.
   liveWidth?: number;
 }): Promise<Blob> {
-  const {
-    before,
-    after,
-    sliderPos,
-    caption,
-    maxWidth = 720,
-    beforeTransform = IDENTITY,
-    afterTransform = IDENTITY,
-    liveWidth,
-  } = opts;
+  const { before, after, caption, beforeLabel, afterLabel, maxWidth = 960 } = opts;
   const beforeImg = await loadImage(before);
   const afterImg = await loadImage(after);
 
-  const ratio = Math.min(1, maxWidth / beforeImg.width);
-  const w = Math.round(beforeImg.width * ratio);
-  const h = Math.round(beforeImg.height * ratio);
+  // Each panel is half the canvas. Use the taller-aspect of the two as the
+  // panel's height ratio so neither image is wildly cropped.
+  const panelW = Math.round(maxWidth / 2);
+  const aspectBefore = beforeImg.width / beforeImg.height;
+  const aspectAfter = afterImg.width / afterImg.height;
+  const panelAspect = Math.min(aspectBefore, aspectAfter);
+  const panelH = Math.round(panelW / panelAspect);
+  const w = panelW * 2;
+  const h = panelH;
 
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext('2d')!;
 
-  // Pan in the live UI is in CSS pixels of the rendered slider. Scale to
-  // the canvas so the saved preview matches the user's framing.
-  const panScale = liveWidth ? w / liveWidth : 1;
+  // Background.
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
 
-  drawTransformed(ctx, beforeImg, w, h, beforeTransform, panScale);
+  drawCover(ctx, beforeImg, 0, 0, panelW, panelH);
+  drawCover(ctx, afterImg, panelW, 0, panelW, panelH);
 
-  // After image is shown to the RIGHT of the slider (left = Before).
-  ctx.save();
-  ctx.beginPath();
-  const sliderX = (w * sliderPos) / 100;
-  ctx.rect(sliderX, 0, w - sliderX, h);
-  ctx.clip();
-  drawTransformed(ctx, afterImg, w, h, afterTransform, panScale);
-  ctx.restore();
+  // Center divider.
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.fillRect(panelW - 1, 0, 2, h);
 
-  // Vertical divider line.
-  const x = (w * sliderPos) / 100;
-  ctx.fillStyle = 'rgba(255,255,255,0.95)';
-  ctx.fillRect(x - 0.5, 0, 1, h);
+  // Per-panel labels.
+  if (beforeLabel) drawLabel(ctx, beforeLabel, 12, 12, 'left');
+  if (afterLabel) drawLabel(ctx, afterLabel, w - 12, 12, 'right');
 
-  // Caption.
-  if (caption) {
-    const fontSize = Math.max(14, Math.round(w / 32));
-    ctx.font = `600 ${fontSize}px Inter, ui-sans-serif, system-ui, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const lines = wrapText(ctx, caption, w * 0.85);
-    const padY = Math.round(fontSize * 0.5);
-    const lineH = Math.round(fontSize * 1.25);
-    const blockH = lines.length * lineH + padY * 2;
-    const blockW = Math.min(w * 0.92, ctx.measureText(longest(lines)).width + padY * 4);
-    const cx = w / 2;
-    const cy = h - blockH / 2 - Math.round(h * 0.04);
-    // Background pill.
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    roundedRect(ctx, cx - blockW / 2, cy - blockH / 2, blockW, blockH, 12);
-    ctx.fill();
-    // Text.
-    ctx.fillStyle = 'white';
-    lines.forEach((line, i) => {
-      const ty = cy - blockH / 2 + padY + i * lineH + lineH / 2;
-      ctx.fillText(line, cx, ty);
-    });
-  }
+  if (caption) drawCaption(ctx, caption, w, h);
 
   return await new Promise<Blob>((resolve) =>
     canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.85),
   );
 }
 
-function drawTransformed(
+function drawCover(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
+  x: number,
+  y: number,
   w: number,
   h: number,
-  t: PreviewTransform,
-  panScale: number,
 ) {
-  // Draw the image cover-fit, with the user's zoom/pan applied around the
-  // canvas center. Mirrors the CSS `transform: translate(...) scale(...)`
-  // with `transform-origin: center center`.
   const aspect = img.width / img.height;
-  const canvasAspect = w / h;
-  let dw: number, dh: number;
-  if (aspect > canvasAspect) {
+  const target = w / h;
+  let dw: number, dh: number, dx: number, dy: number;
+  if (aspect > target) {
     dh = h;
     dw = h * aspect;
+    dx = x + (w - dw) / 2;
+    dy = y;
   } else {
     dw = w;
     dh = w / aspect;
+    dx = x;
+    dy = y + (h - dh) / 2;
   }
-  const cx = w / 2;
-  const cy = h / 2;
   ctx.save();
-  ctx.translate(cx + t.panX * panScale, cy + t.panY * panScale);
-  ctx.scale(t.zoom, t.zoom);
-  ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.drawImage(img, dx, dy, dw, dh);
   ctx.restore();
+}
+
+function drawLabel(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  align: 'left' | 'right',
+) {
+  const padX = 10;
+  const padY = 6;
+  ctx.font = `600 14px Inter, ui-sans-serif, system-ui, sans-serif`;
+  ctx.textBaseline = 'top';
+  const metrics = ctx.measureText(text);
+  const tw = metrics.width;
+  const th = 16;
+  const boxW = tw + padX * 2;
+  const boxH = th + padY * 2;
+  const bx = align === 'left' ? x : x - boxW;
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  roundedRect(ctx, bx, y, boxW, boxH, 999);
+  ctx.fill();
+  ctx.fillStyle = '#831843';
+  ctx.textAlign = 'left';
+  ctx.fillText(text, bx + padX, y + padY);
+}
+
+function drawCaption(ctx: CanvasRenderingContext2D, caption: string, w: number, h: number) {
+  const fontSize = Math.max(14, Math.round(w / 36));
+  ctx.font = `600 ${fontSize}px Inter, ui-sans-serif, system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const lines = wrapText(ctx, caption, w * 0.85);
+  const padY = Math.round(fontSize * 0.5);
+  const lineH = Math.round(fontSize * 1.3);
+  const blockH = lines.length * lineH + padY * 2;
+  const blockW = Math.min(w * 0.92, ctx.measureText(longest(lines)).width + padY * 4);
+  const cx = w / 2;
+  const cy = h - blockH / 2 - Math.round(h * 0.04);
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  roundedRect(ctx, cx - blockW / 2, cy - blockH / 2, blockW, blockH, 12);
+  ctx.fill();
+  ctx.fillStyle = 'white';
+  lines.forEach((line, i) => {
+    const ty = cy - blockH / 2 + padY + i * lineH + lineH / 2;
+    ctx.fillText(line, cx, ty);
+  });
 }
 
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
