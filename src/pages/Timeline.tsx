@@ -40,7 +40,7 @@ type Event =
   | { kind: 'product-stop'; date: string; sortKey: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
   | { kind: 'treatment'; date: string; sortKey: number; treatment: Treatment }
   | { kind: 'comparison'; date: string; sortKey: number; comparison: Comparison; sinceTreatment?: SinceTreatment }
-  | { kind: 'rating'; date: string; sortKey: number; rating: number; sinceTreatment?: SinceTreatment };
+  | { kind: 'rating'; date: string; sortKey: number; rating: number; notes?: string; sinceTreatment?: SinceTreatment };
 
 type Filter = 'all' | 'photos' | 'products' | 'treatments' | 'comparisons' | 'ratings';
 
@@ -185,6 +185,7 @@ export default function Timeline() {
         // Ratings sort above photos for the same date.
         sortKey: dateKey(r.date) + 0.1,
         rating: r.rating,
+        notes: r.notes,
         sinceTreatment: lastTreatmentBefore(r.date),
       });
     });
@@ -582,33 +583,51 @@ function Body({
         />
       );
     case 'rating':
-      return <RatingBody rating={event.rating} compact={compact} />;
+      return <RatingBody rating={event.rating} notes={event.notes} compact={compact} />;
   }
 }
 
-function RatingBody({ rating, compact }: { rating: number; compact: boolean }) {
+function RatingBody({
+  rating,
+  notes,
+  compact,
+}: {
+  rating: number;
+  notes?: string;
+  compact: boolean;
+}) {
   const labels = ['Awful', 'Meh', 'OK', 'Good', 'Glowing'];
   if (compact) {
     return (
       <div className="text-xs text-glow-700">
-        {rating}/5 · {labels[rating - 1]}
+        {rating > 0 ? `${rating}/5 · ${labels[rating - 1]}` : 'Note'}
+        {notes ? ` · ${notes.slice(0, 60)}${notes.length > 60 ? '…' : ''}` : ''}
       </div>
     );
   }
   return (
-    <div className="text-sm flex items-center gap-2">
-      <div className="flex gap-0.5">
-        {[1, 2, 3, 4, 5].map((n) => (
-          <Star
-            key={n}
-            size={16}
-            className={n <= rating ? 'text-yellow-500 fill-yellow-400' : 'text-glow-200'}
-          />
-        ))}
-      </div>
-      <span className="text-glow-700 text-xs">
-        {rating}/5 · {labels[rating - 1]}
-      </span>
+    <div className="text-sm">
+      {rating > 0 && (
+        <div className="flex items-center gap-2">
+          <div className="flex gap-0.5">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <Star
+                key={n}
+                size={16}
+                className={n <= rating ? 'text-yellow-500 fill-yellow-400' : 'text-glow-200'}
+              />
+            ))}
+          </div>
+          <span className="text-glow-700 text-xs">
+            {rating}/5 · {labels[rating - 1]}
+          </span>
+        </div>
+      )}
+      {notes && (
+        <p className={`text-xs text-glow-800 italic whitespace-pre-wrap ${rating > 0 ? 'mt-1.5' : ''}`}>
+          {notes}
+        </p>
+      )}
     </div>
   );
 }
