@@ -97,6 +97,7 @@ export interface Product {
   notes?: string;
   rating?: number;                // 1–5; user's overall rating of the product
   comments?: string;              // free-form review/comments
+  sortOrder?: number;             // explicit display order (lower = earlier)
 }
 
 export type TreatmentType =

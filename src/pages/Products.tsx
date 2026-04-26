@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useLocation } from 'react-router-dom';
-import { AlertTriangle, ChevronRight, Loader2, Pencil, Plus, ScanLine, Star, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, ChevronUp, Loader2, Pencil, Plus, ScanLine, Star, Trash2, X } from 'lucide-react';
 import {
   CONCERNS,
   PRODUCT_CATEGORIES,
@@ -43,11 +43,33 @@ export default function Products() {
   const [scanResults, setScanResults] = useState<ScannedProduct[] | null>(null);
   const scanRef = useRef<HTMLInputElement>(null);
 
-  const products = useLiveQuery(
-    () => db.products.orderBy('startedOn').reverse().toArray(),
-    [],
-  );
+  const products = useLiveQuery(async () => {
+    const all = await db.products.toArray();
+    // Sort: explicit sortOrder ascending; rows without sortOrder fall to the
+    // bottom in startedOn-desc order (newest first).
+    return all.sort((a, b) => {
+      const ao = a.sortOrder;
+      const bo = b.sortOrder;
+      if (ao !== undefined && bo !== undefined) return ao - bo;
+      if (ao !== undefined) return -1;
+      if (bo !== undefined) return 1;
+      return b.startedOn.localeCompare(a.startedOn);
+    });
+  }, []);
   const sensitivities = useLiveQuery(() => db.sensitivities.toArray(), []);
+
+  async function moveProduct(list: Product[], index: number, dir: 'up' | 'down') {
+    const swapWith = dir === 'up' ? index - 1 : index + 1;
+    if (swapWith < 0 || swapWith >= list.length) return;
+    // Seed sortOrder for the whole list so swaps stay stable across rerenders.
+    const updates = list.map((p, i) => {
+      let pos = i;
+      if (i === index) pos = swapWith;
+      else if (i === swapWith) pos = index;
+      return { ...p, sortOrder: pos };
+    });
+    await db.products.bulkPut(updates);
+  }
 
   // If we navigated here with state.editProductId, open that product's editor
   // once the products query has loaded.
@@ -182,13 +204,16 @@ export default function Products() {
                   · {inCategory.length}
                 </span>
               </div>
-              {inCategory.map((p) => (
+              {inCategory.map((p, i) => (
                 <ProductCard
                   key={p.id}
                   product={p}
                   sensitiveSet={userSensitiveSet}
                   onEdit={() => setEditing(p)}
                   onDelete={() => db.products.delete(p.id!)}
+                  canMoveUp={i > 0}
+                  canMoveDown={i < inCategory.length - 1}
+                  onMove={(dir) => moveProduct(inCategory, i, dir)}
                 />
               ))}
             </div>
@@ -382,11 +407,17 @@ function ProductCard({
   sensitiveSet,
   onEdit,
   onDelete,
+  canMoveUp,
+  canMoveDown,
+  onMove,
 }: {
   product: Product;
   sensitiveSet: Set<string>;
   onEdit: () => void;
   onDelete: () => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMove: (dir: 'up' | 'down') => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -455,6 +486,32 @@ function ProductCard({
               </span>
             )}
           </div>
+        </div>
+        <div className="flex flex-col items-center shrink-0">
+          <span
+            role="button"
+            tabIndex={canMoveUp ? 0 : -1}
+            aria-label="Move up"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (canMoveUp) onMove('up');
+            }}
+            className={`p-1 rounded-full ${canMoveUp ? 'text-glow-700 hover:bg-glow-100 cursor-pointer' : 'text-glow-200'}`}
+          >
+            <ChevronUp size={14} />
+          </span>
+          <span
+            role="button"
+            tabIndex={canMoveDown ? 0 : -1}
+            aria-label="Move down"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (canMoveDown) onMove('down');
+            }}
+            className={`p-1 rounded-full ${canMoveDown ? 'text-glow-700 hover:bg-glow-100 cursor-pointer' : 'text-glow-200'}`}
+          >
+            <ChevronDown size={14} />
+          </span>
         </div>
         <div className="flex gap-0.5 shrink-0">
           <span
