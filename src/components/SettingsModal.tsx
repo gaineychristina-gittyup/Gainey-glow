@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ExternalLink, Eye, EyeOff, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Check, ExternalLink, Eye, EyeOff, X } from 'lucide-react';
 import {
   getGeminiKey,
   getGeminiModel,
@@ -11,14 +11,22 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [key, setKey] = useState(getGeminiKey());
   const [model, setModel] = useState(getGeminiModel());
   const [show, setShow] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [savedAt, setSavedAt] = useState(0);
+  const firstRender = useRef(true);
 
-  function save() {
-    setGeminiKey(key.trim());
-    setGeminiModel(model.trim() || 'gemini-2.5-flash');
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
-  }
+  // Auto-save with a tiny debounce so each keystroke isn't a write.
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    const t = setTimeout(() => {
+      setGeminiKey(key.trim());
+      setGeminiModel(model.trim() || 'gemini-2.5-flash');
+      setSavedAt(Date.now());
+    }, 350);
+    return () => clearTimeout(t);
+  }, [key, model]);
 
   return (
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/40 p-3">
@@ -35,8 +43,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           <p className="text-xs text-glow-600">
             Add your own Google Gemini API key to scan product photos and auto-fill name,
             brand, ingredients and concerns. Photos are sent to Google only when you tap
-            <span className="font-semibold"> Scan</span>. The key is stored locally on this
-            device — never on a server we run.
+            <span className="font-semibold"> Scan</span>. The key is stored on this device
+            (localStorage) — it persists across visits and never goes to a server we run.
           </p>
           <a
             href="https://aistudio.google.com/app/apikey"
@@ -48,14 +56,23 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           </a>
 
           <div>
-            <label className="label">API key</label>
-            <div className="flex gap-2">
+            <div className="flex items-center justify-between">
+              <label className="label mb-0">API key</label>
+              {key.trim() ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700">
+                  <Check size={12} /> Saved on this device
+                </span>
+              ) : null}
+            </div>
+            <div className="mt-1 flex gap-2">
               <input
                 className="input flex-1 font-mono"
                 type={show ? 'text' : 'password'}
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
                 placeholder="AI..."
+                autoComplete="off"
+                spellCheck={false}
               />
               <button
                 className="btn-ghost p-2"
@@ -66,6 +83,15 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 {show ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
+            {key.trim() && (
+              <button
+                type="button"
+                className="mt-2 text-[11px] text-red-600 hover:underline"
+                onClick={() => setKey('')}
+              >
+                Clear API key
+              </button>
+            )}
           </div>
 
           <div>
@@ -82,11 +108,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             </p>
           </div>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button className="btn-ghost" onClick={onClose}>Close</button>
-            <button className="btn-primary" onClick={save}>
-              {saved ? 'Saved ✓' : 'Save'}
-            </button>
+          <div className="flex justify-between items-center pt-2">
+            <span className="text-[11px] text-glow-500 min-h-[1em]">
+              {savedAt > 0 && Date.now() - savedAt < 2000 ? 'Saved ✓' : ''}
+            </span>
+            <button className="btn-primary" onClick={onClose}>Done</button>
           </div>
         </section>
       </div>
