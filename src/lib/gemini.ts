@@ -13,9 +13,11 @@ export interface ScannedProduct {
   notes?: string;
 }
 
-const PROMPT = `You are helping log a skincare product into a tracking app.
+const PROMPT = `You are helping log skincare products into a tracking app.
 
-Look at the photo of this skincare product (or its label/packaging) and extract:
+Look at the photo and identify EVERY skincare product visible (multiple bottles,
+boxes, or labels can be in one photo). For EACH distinct product, extract:
+
 - name: the product's specific name (NOT the brand). Trim marketing fluff.
 - brand: the brand name only.
 - step: which routine step it belongs to. Pick exactly one of:
@@ -29,9 +31,10 @@ Look at the photo of this skincare product (or its label/packaging) and extract:
 - notes: optional one-line callout (e.g. "limit to PM use", "fragrance-free").
 
 If a field is genuinely unknown, leave it empty (empty string or empty array).
-If the photo is not a skincare product, set name to "" and concerns/ingredients to [].`;
+Return an object with a "products" array. If only one product is visible, return
+one item. If no skincare product is visible, return an empty array.`;
 
-const RESPONSE_SCHEMA = {
+const PRODUCT_ITEM_SCHEMA = {
   type: 'object',
   properties: {
     name: { type: 'string' },
@@ -53,6 +56,17 @@ const RESPONSE_SCHEMA = {
   required: ['name', 'concerns', 'ingredients'],
 };
 
+const RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    products: {
+      type: 'array',
+      items: PRODUCT_ITEM_SCHEMA,
+    },
+  },
+  required: ['products'],
+};
+
 async function blobToBase64(blob: Blob): Promise<{ data: string; mime: string }> {
   const buf = await blob.arrayBuffer();
   let binary = '';
@@ -64,7 +78,22 @@ async function blobToBase64(blob: Blob): Promise<{ data: string; mime: string }>
   return { data: btoa(binary), mime: blob.type || 'image/jpeg' };
 }
 
-export async function scanProductImage(image: Blob): Promise<ScannedProduct> {
+function normalize(p: Partial<ScannedProduct>): ScannedProduct {
+  return {
+    name: (p.name ?? '').toString().trim(),
+    brand: (p.brand ?? '').toString().trim() || undefined,
+    step: p.step,
+    concerns: Array.isArray(p.concerns) ? (p.concerns as Concern[]) : [],
+    ingredients: Array.isArray(p.ingredients)
+      ? (p.ingredients as string[])
+          .map((i) => String(i).trim().toLowerCase())
+          .filter(Boolean)
+      : [],
+    notes: (p.notes ?? '').toString().trim() || undefined,
+  };
+}
+
+export async function scanProductsFromImage(image: Blob): Promise<ScannedProduct[]> {
   const key = getGeminiKey();
   if (!key) throw new Error('No Gemini API key set. Add one in Settings.');
   const model = getGeminiModel();
@@ -106,28 +135,41 @@ export async function scanProductImage(image: Blob): Promise<ScannedProduct> {
     } catch {
       // keep default msg
     }
+    if (res.status === 400 && /api key/i.test(msg)) {
+      msg = 'API key not valid. Check it in Settings.';
+    } else if (res.status === 429) {
+      msg = 'Gemini rate limit reached. Wait a minute and try again.';
+    } else if (res.status === 403) {
+      msg = `${msg} (Make sure the Generative Language API is enabled for this key.)`;
+    }
     throw new Error(msg);
   }
 
   const json = await res.json();
-  const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Gemini returned an empty response.');
+  const candidate = json?.candidates?.[0];
+  const finishReason: string | undefined = candidate?.finishReason;
+  const text: string | undefined = candidate?.content?.parts?.[0]?.text;
 
-  let parsed: ScannedProduct;
+  if (!text) {
+    if (finishReason === 'SAFETY') {
+      throw new Error('Gemini blocked the response (safety filter). Try a clearer photo of just the product.');
+    }
+    if (finishReason === 'RECITATION') {
+      throw new Error('Gemini blocked the response (recitation). Try a different photo.');
+    }
+    if (json?.promptFeedback?.blockReason) {
+      throw new Error(`Gemini blocked the request: ${json.promptFeedback.blockReason}`);
+    }
+    throw new Error(`Gemini returned no content${finishReason ? ` (finishReason: ${finishReason})` : ''}.`);
+  }
+
+  let parsed: { products?: Partial<ScannedProduct>[] };
   try {
     parsed = JSON.parse(text);
   } catch {
     throw new Error('Could not parse Gemini response as JSON.');
   }
 
-  return {
-    name: (parsed.name ?? '').trim(),
-    brand: (parsed.brand ?? '').trim() || undefined,
-    step: parsed.step,
-    concerns: Array.isArray(parsed.concerns) ? parsed.concerns : [],
-    ingredients: Array.isArray(parsed.ingredients)
-      ? parsed.ingredients.map((i) => String(i).trim().toLowerCase()).filter(Boolean)
-      : [],
-    notes: (parsed.notes ?? '').trim() || undefined,
-  };
+  const products = Array.isArray(parsed.products) ? parsed.products : [];
+  return products.map(normalize).filter((p) => p.name);
 }

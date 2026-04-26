@@ -15,7 +15,7 @@ import {
   findIrritant,
 } from '../data/ingredientReference';
 import { fmtDate, todayISO } from '../lib/date';
-import { scanProductImage } from '../lib/gemini';
+import { scanProductsFromImage, type ScannedProduct } from '../lib/gemini';
 import { getGeminiKey } from '../lib/settings';
 import ChipMultiSelect from '../components/ChipMultiSelect';
 
@@ -35,6 +35,7 @@ export default function Products() {
   const [showSensitivity, setShowSensitivity] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [scanResults, setScanResults] = useState<ScannedProduct[] | null>(null);
   const scanRef = useRef<HTMLInputElement>(null);
 
   const products = useLiveQuery(
@@ -52,20 +53,25 @@ export default function Products() {
     }
     setScanning(true);
     try {
-      const result = await scanProductImage(file);
-      if (!result.name) {
-        setScanError("Couldn't recognize a product in that photo. Try the label or box.");
+      const results = await scanProductsFromImage(file);
+      if (results.length === 0) {
+        setScanError("Couldn't find any skincare products in that photo. Try a clearer shot of the label, or use Add for manual entry.");
         return;
       }
-      setEditing({
-        ...blank,
-        name: result.name,
-        brand: result.brand ?? '',
-        step: result.step ?? blank.step,
-        concerns: result.concerns,
-        ingredients: result.ingredients,
-        notes: result.notes ?? '',
-      });
+      if (results.length === 1) {
+        const r = results[0];
+        setEditing({
+          ...blank,
+          name: r.name,
+          brand: r.brand ?? '',
+          step: r.step ?? blank.step,
+          concerns: r.concerns,
+          ingredients: r.ingredients,
+          notes: r.notes ?? '',
+        });
+      } else {
+        setScanResults(results);
+      }
     } catch (e) {
       setScanError(e instanceof Error ? e.message : 'Scan failed');
     } finally {
@@ -100,6 +106,7 @@ export default function Products() {
               className="btn-soft"
               onClick={() => scanRef.current?.click()}
               disabled={scanning}
+              title="Snap one or many products in a single photo"
             >
               {scanning ? <Loader2 size={16} className="animate-spin" /> : <ScanLine size={16} />}
               {scanning ? 'Scanning' : 'Scan'}
@@ -172,6 +179,154 @@ export default function Products() {
       {showSensitivity && (
         <SensitivityEditor onClose={() => setShowSensitivity(false)} />
       )}
+
+      {scanResults && (
+        <MultiScanModal
+          results={scanResults}
+          onClose={() => setScanResults(null)}
+          onAdd={async (chosen) => {
+            for (const r of chosen) {
+              await db.products.add({
+                name: r.name,
+                brand: r.brand,
+                step: r.step ?? 'serum',
+                concerns: r.concerns,
+                ingredients: r.ingredients,
+                startedOn: todayISO(),
+                timeOfDay: ['am', 'pm'],
+                notes: r.notes,
+              });
+            }
+            setScanResults(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function MultiScanModal({
+  results,
+  onClose,
+  onAdd,
+}: {
+  results: ScannedProduct[];
+  onClose: () => void;
+  onAdd: (chosen: ScannedProduct[]) => Promise<void>;
+}) {
+  const [selected, setSelected] = useState<Set<number>>(
+    () => new Set(results.map((_, i) => i)),
+  );
+  const [saving, setSaving] = useState(false);
+
+  const toggle = (i: number) => {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/40 p-3">
+      <div className="card w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-display text-lg text-glow-800">
+            {results.length} products detected
+          </h3>
+          <button className="btn-ghost p-2" onClick={onClose} aria-label="Close">
+            <X size={16} />
+          </button>
+        </div>
+
+        <p className="text-xs text-glow-600 mb-3">
+          Tap to deselect any you don't want to add. Defaults: started today, used AM/PM.
+          You can edit each one after saving.
+        </p>
+
+        <ul className="space-y-2">
+          {results.map((r, i) => {
+            const isSel = selected.has(i);
+            return (
+              <li key={i}>
+                <button
+                  type="button"
+                  onClick={() => toggle(i)}
+                  className={`w-full text-left rounded-xl border px-3 py-2.5 transition ${
+                    isSel
+                      ? 'bg-glow-50 border-glow-300'
+                      : 'bg-white/60 border-glow-200 opacity-60'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <span
+                      className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-md border ${
+                        isSel
+                          ? 'bg-glow-600 border-glow-600 text-white'
+                          : 'border-glow-300 bg-white'
+                      }`}
+                    >
+                      {isSel && <span className="text-xs leading-none">✓</span>}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="font-medium text-glow-900 truncate">{r.name}</span>
+                        {r.brand && (
+                          <span className="text-xs text-glow-600">{r.brand}</span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {r.step && (
+                          <span className="chip text-[10px]">
+                            {PRODUCT_STEPS.find((s) => s.id === r.step)?.label ?? r.step}
+                          </span>
+                        )}
+                        {r.concerns.slice(0, 3).map((c) => (
+                          <span key={c} className="chip text-[10px]">
+                            {CONCERNS.find((x) => x.id === c)?.label ?? c}
+                          </span>
+                        ))}
+                      </div>
+                      {r.ingredients.length > 0 && (
+                        <div className="mt-1 text-[11px] text-glow-600 line-clamp-2">
+                          {r.ingredients.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className="mt-4 flex justify-between gap-2">
+          <button
+            className="btn-ghost"
+            onClick={() => setSelected(new Set(results.map((_, i) => i)))}
+          >
+            Select all
+          </button>
+          <div className="flex gap-2">
+            <button className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button
+              className="btn-primary"
+              disabled={selected.size === 0 || saving}
+              onClick={async () => {
+                setSaving(true);
+                try {
+                  await onAdd(results.filter((_, i) => selected.has(i)));
+                } finally {
+                  setSaving(false);
+                }
+              }}
+            >
+              Add {selected.size}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
