@@ -16,6 +16,15 @@ body {
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  /* Disable page-level pinch-zoom and double-tap zoom on iOS while still
+     allowing in-app gestures (the Compare slider zooms via CSS transforms,
+     not browser zoom, so it's unaffected). */
+  touch-action: manipulation;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 @layer components {
