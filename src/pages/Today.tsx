@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Camera, Check, ChevronLeft, ChevronRight, Sun, Moon, Upload } from 'lucide-react';
 import { db, ZONES, type PhotoEntry, type Product, type Zone } from '../db/schema';
@@ -212,6 +212,8 @@ export default function Today() {
 
       {viewing && <PhotoViewer photo={viewing} onClose={() => setViewing(null)} />}
 
+      <SkinRatingCard date={date} />
+
       <section className="card">
         <h3 className="font-display text-lg text-glow-800 mb-3">Captured today</h3>
         {(photosToday?.length ?? 0) === 0 ? (
@@ -222,18 +224,18 @@ export default function Today() {
               (grouped[z.id]?.length ?? 0) === 0 ? null : (
                 <div key={z.id}>
                   <div className="text-xs font-semibold text-glow-700 mb-1.5">{z.label}</div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5">
                     {grouped[z.id]!.map((p) => (
                       <button
                         key={p.id}
                         type="button"
                         onClick={() => setViewing(p)}
-                        className="relative block focus:outline-none focus:ring-2 focus:ring-glow-500 rounded-xl"
+                        className="relative block focus:outline-none focus:ring-2 focus:ring-glow-500 rounded-lg"
                       >
                         <PhotoThumb
                           blob={p.thumb}
                           alt={`${z.label} on ${p.date}`}
-                          className="aspect-square w-full object-cover rounded-xl"
+                          className="aspect-square w-full object-cover rounded-lg"
                         />
                       </button>
                     ))}
@@ -244,8 +246,6 @@ export default function Today() {
           </div>
         )}
       </section>
-
-      <SkinRatingCard date={date} />
 
       <RoutineChecklist date={date} products={productsToday ?? []} />
 
@@ -392,9 +392,17 @@ function SkinRatingCard({ date }: { date: string }) {
     () => db.skinRatings.where('date').equals(date).first(),
     [date],
   );
-  const value = rating?.rating ?? 0;
+  const persisted = rating?.rating ?? 0;
+  // Local mirror so the thumb moves instantly even before the Dexie
+  // round-trip — otherwise the controlled `value` prop briefly stays at
+  // the old number and the slider appears to land "in between".
+  const [local, setLocal] = useState(persisted);
+  useEffect(() => {
+    setLocal(persisted);
+  }, [persisted, date]);
 
-  async function setRating(v: number) {
+  async function commit(v: number) {
+    setLocal(v);
     if (rating?.id) {
       if (v === 0) await db.skinRatings.delete(rating.id);
       else await db.skinRatings.update(rating.id, { rating: v });
@@ -416,30 +424,36 @@ function SkinRatingCard({ date }: { date: string }) {
           min={0}
           max={5}
           step={1}
-          value={value}
-          onChange={(e) => setRating(Number(e.target.value))}
+          value={local}
+          onChange={(e) => setLocal(Math.round(Number(e.target.value)))}
+          onPointerUp={(e) => commit(Math.round(Number((e.target as HTMLInputElement).value)))}
+          onKeyUp={(e) => commit(Math.round(Number((e.target as HTMLInputElement).value)))}
           className="flex-1 accent-pink-500"
           aria-label="Skin rating, 0 to 5"
         />
         <div className="text-2xl font-display tabular-nums w-10 text-right text-glow-900">
-          {value === 0 ? '—' : value}
+          {local === 0 ? '—' : local}
         </div>
       </div>
-      <div className="mt-1 flex justify-between text-[10px] text-glow-500 px-1 select-none">
+      <div className="mt-2 grid grid-cols-6 gap-1 text-xs select-none">
         {[0, 1, 2, 3, 4, 5].map((n) => (
           <button
             key={n}
             type="button"
-            onClick={() => setRating(n)}
-            className={`px-1 ${n === value ? 'text-glow-800 font-semibold' : ''}`}
+            onClick={() => commit(n)}
+            className={`rounded-full py-1 font-medium border transition ${
+              n === local
+                ? 'bg-glow-600 text-white border-glow-600'
+                : 'bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50'
+            }`}
             aria-label={`Set rating to ${n === 0 ? 'cleared' : n}`}
           >
-            {n === 0 ? 'clear' : n}
+            {n === 0 ? '—' : n}
           </button>
         ))}
       </div>
-      {value > 0 && (
-        <div className="mt-1 text-xs text-glow-700 italic">{labels[value - 1]}</div>
+      {local > 0 && (
+        <div className="mt-2 text-xs text-glow-700 italic">{labels[local - 1]}</div>
       )}
     </section>
   );
