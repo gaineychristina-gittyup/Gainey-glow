@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Camera, Check, Sun, Moon, Upload, Trash2 } from 'lucide-react';
-import { db, ZONES, type Product, type Zone } from '../db/schema';
+import { db, FEEL_TAGS, ZONES, type FeelTag, type Product, type Zone } from '../db/schema';
 import { todayISO, fmtDate, relDays } from '../lib/date';
 import { makeThumbnail } from '../lib/image';
 import ZonePicker from '../components/ZonePicker';
@@ -134,6 +134,8 @@ export default function Today() {
         </p>
       </section>
 
+      <FeelTagsSection date={date} />
+
       <section className="card">
         <h3 className="font-display text-lg text-glow-800 mb-3">Captured today</h3>
         {(photosToday?.length ?? 0) === 0 ? (
@@ -188,6 +190,61 @@ export default function Today() {
         </section>
       )}
     </div>
+  );
+}
+
+function FeelTagsSection({ date }: { date: string }) {
+  const checkin = useLiveQuery(
+    () => db.checkins.where('date').equals(date).first(),
+    [date],
+  );
+  const tags = checkin?.tags ?? [];
+
+  async function toggle(tag: FeelTag) {
+    const next = tags.includes(tag) ? tags.filter((t) => t !== tag) : [...tags, tag];
+    if (checkin?.id) {
+      if (next.length === 0) await db.checkins.delete(checkin.id);
+      else await db.checkins.update(checkin.id, { tags: next });
+    } else if (next.length > 0) {
+      await db.checkins.add({ date, tags: next });
+    }
+  }
+
+  const toneClass = (selected: boolean, tone: 'good' | 'neutral' | 'bad') => {
+    if (!selected) return 'bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50';
+    if (tone === 'good') return 'bg-emerald-100 text-emerald-800 border-emerald-300';
+    if (tone === 'bad') return 'bg-amber-100 text-amber-800 border-amber-300';
+    return 'bg-glow-200 text-glow-900 border-glow-300';
+  };
+
+  return (
+    <section className="card">
+      <h3 className="font-display text-lg text-glow-800 mb-1">How does it feel?</h3>
+      <p className="text-xs text-glow-600 mb-3">Tap any that apply for this day.</p>
+      <div className="flex flex-wrap gap-2">
+        {FEEL_TAGS.map((t) => {
+          const selected = tags.includes(t.id);
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => toggle(t.id)}
+              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${toneClass(selected, t.tone)}`}
+            >
+              <span
+                className={`flex h-4 w-4 items-center justify-center rounded-full border ${
+                  selected ? 'bg-glow-600 border-glow-600 text-white' : 'border-glow-300 bg-white'
+                }`}
+                aria-hidden
+              >
+                {selected && <Check size={10} />}
+              </span>
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
