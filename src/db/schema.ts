@@ -188,6 +188,12 @@ export interface Comparison {
   zone: Zone;
   sliderPos: number;       // 0–100, where the divider sat at save time
   caption?: string;
+  beforeZoom?: number;
+  beforePanX?: number;
+  beforePanY?: number;
+  afterZoom?: number;
+  afterPanX?: number;
+  afterPanY?: number;
   // Reference: a product or treatment used as the "anchor" for the date labels.
   referenceKind?: 'product' | 'treatment';
   referenceId?: number;

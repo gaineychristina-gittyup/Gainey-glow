@@ -1,8 +1,17 @@
 // Render a saved-comparison preview to a JPEG blob, sized for Timeline.
 // The preview shows the before image with the after image clipped to the
 // left of the slider position, plus an optional caption at the bottom.
+// Each image can carry its own zoom/pan transform (matching the live UI).
 
 import { loadImage } from './image';
+
+export interface PreviewTransform {
+  zoom: number;
+  panX: number;
+  panY: number;
+}
+
+const IDENTITY: PreviewTransform = { zoom: 1, panX: 0, panY: 0 };
 
 export async function renderComparisonPreview(opts: {
   before: Blob;
@@ -10,8 +19,22 @@ export async function renderComparisonPreview(opts: {
   sliderPos: number;     // 0-100
   caption?: string;
   maxWidth?: number;
+  beforeTransform?: PreviewTransform;
+  afterTransform?: PreviewTransform;
+  // The pixel size of the live slider, used to scale pan offsets to the
+  // preview canvas correctly. Optional — falls back to canvas width.
+  liveWidth?: number;
 }): Promise<Blob> {
-  const { before, after, sliderPos, caption, maxWidth = 720 } = opts;
+  const {
+    before,
+    after,
+    sliderPos,
+    caption,
+    maxWidth = 720,
+    beforeTransform = IDENTITY,
+    afterTransform = IDENTITY,
+    liveWidth,
+  } = opts;
   const beforeImg = await loadImage(before);
   const afterImg = await loadImage(after);
 
@@ -24,31 +47,18 @@ export async function renderComparisonPreview(opts: {
   canvas.height = h;
   const ctx = canvas.getContext('2d')!;
 
-  // Before fills the full canvas.
-  ctx.drawImage(beforeImg, 0, 0, w, h);
+  // Pan in the live UI is in CSS pixels of the rendered slider. Scale to
+  // the canvas so the saved preview matches the user's framing.
+  const panScale = liveWidth ? w / liveWidth : 1;
 
-  // After image is drawn with cover-fit semantics to match before.
-  const afterAspect = afterImg.width / afterImg.height;
-  const canvasAspect = w / h;
-  let dw: number, dh: number, dx: number, dy: number;
-  if (afterAspect > canvasAspect) {
-    dh = h;
-    dw = h * afterAspect;
-    dx = (w - dw) / 2;
-    dy = 0;
-  } else {
-    dw = w;
-    dh = w / afterAspect;
-    dx = 0;
-    dy = (h - dh) / 2;
-  }
+  drawTransformed(ctx, beforeImg, w, h, beforeTransform, panScale);
 
-  // Clip to the slider area and draw after on top.
+  // After image clipped to the slider area, drawn on top.
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, (w * sliderPos) / 100, h);
   ctx.clip();
-  ctx.drawImage(afterImg, dx, dy, dw, dh);
+  drawTransformed(ctx, afterImg, w, h, afterTransform, panScale);
   ctx.restore();
 
   // Vertical divider line.
@@ -84,6 +94,36 @@ export async function renderComparisonPreview(opts: {
   return await new Promise<Blob>((resolve) =>
     canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.85),
   );
+}
+
+function drawTransformed(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  w: number,
+  h: number,
+  t: PreviewTransform,
+  panScale: number,
+) {
+  // Draw the image cover-fit, with the user's zoom/pan applied around the
+  // canvas center. Mirrors the CSS `transform: translate(...) scale(...)`
+  // with `transform-origin: center center`.
+  const aspect = img.width / img.height;
+  const canvasAspect = w / h;
+  let dw: number, dh: number;
+  if (aspect > canvasAspect) {
+    dh = h;
+    dw = h * aspect;
+  } else {
+    dw = w;
+    dh = w / aspect;
+  }
+  const cx = w / 2;
+  const cy = h / 2;
+  ctx.save();
+  ctx.translate(cx + t.panX * panScale, cy + t.panY * panScale);
+  ctx.scale(t.zoom, t.zoom);
+  ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+  ctx.restore();
 }
 
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
