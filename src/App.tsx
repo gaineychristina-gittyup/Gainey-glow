@@ -7,19 +7,17 @@ import Products from './pages/Products';
 import Timeline from './pages/Timeline';
 import Insights from './pages/Insights';
 import SettingsModal from './components/SettingsModal';
-import { useGeminiKey } from './lib/settings';
 
 const NAV = [
   { to: '/', label: 'Today', icon: Camera, end: true },
   { to: '/compare', label: 'Compare', icon: Images },
   { to: '/products', label: 'Products', icon: FlaskConical },
   { to: '/timeline', label: 'Timeline', icon: CalendarDays },
-  { to: '/insights', label: 'Insights', icon: Layers },
+  { to: '/insights', label: 'Insights/AI', icon: Layers },
 ];
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false);
-  const apiKey = useGeminiKey();
   return (
     <div className="min-h-full flex flex-col bg-gradient-to-b from-[#b89888] via-[#8a6657] to-[#4a342d]">
       <header className="px-4 pt-6 pb-3 max-w-3xl w-full mx-auto flex items-start justify-between">
@@ -30,17 +28,11 @@ export default function App() {
           <p className="text-sm text-rose-100/80">Your daily skin journal.</p>
         </div>
         <button
-          className="relative p-2 mt-1 rounded-full text-rose-50 hover:bg-white/15 transition active:scale-95"
+          className="p-2 mt-1 rounded-full text-rose-50 hover:bg-white/15 transition active:scale-95"
           onClick={() => setShowSettings(true)}
           aria-label="Settings"
         >
           <Settings size={20} />
-          {apiKey && (
-            <span
-              className="absolute top-1 right-1 h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-[#8a6657]"
-              aria-label="Gemini API key saved"
-            />
-          )}
         </button>
       </header>
 

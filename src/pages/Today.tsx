@@ -612,15 +612,15 @@ function RoutineColumn({
         </ul>
       )}
 
-      {candidates.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setAdding(true)}
-          className="mt-2 w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-glow-300 px-3 py-2 text-xs text-glow-700 hover:bg-glow-50"
-        >
-          <Plus size={14} /> Add another product
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={() => setAdding(true)}
+        disabled={candidates.length === 0}
+        className="mt-2 w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-glow-300 px-3 py-2 text-xs font-medium text-glow-700 hover:bg-glow-50 disabled:opacity-40"
+      >
+        <Plus size={14} />
+        {candidates.length === 0 ? 'No more products to add' : `Add another ${label.toUpperCase()} product`}
+      </button>
 
       {adding && (
         <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/40 p-3">

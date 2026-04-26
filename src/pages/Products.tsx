@@ -1,7 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useLocation } from 'react-router-dom';
-import { AlertTriangle, ChevronDown, ChevronRight, ChevronUp, Loader2, Pencil, Plus, ScanLine, Star, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ChevronRight, GripVertical, Loader2, Pencil, Plus, ScanLine, Star, Trash2, X } from 'lucide-react';
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   CONCERNS,
   PRODUCT_CATEGORIES,
@@ -59,16 +75,12 @@ export default function Products() {
   }, []);
   const sensitivities = useLiveQuery(() => db.sensitivities.toArray(), []);
 
-  async function moveProduct(list: Product[], index: number, dir: 'up' | 'down') {
-    const swapWith = dir === 'up' ? index - 1 : index + 1;
-    if (swapWith < 0 || swapWith >= list.length) return;
-    // Seed sortOrder for the whole list so swaps stay stable across rerenders.
-    const updates = list.map((p, i) => {
-      let pos = i;
-      if (i === index) pos = swapWith;
-      else if (i === swapWith) pos = index;
-      return { ...p, sortOrder: pos };
-    });
+  async function reorderInCategory(list: Product[], fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) return;
+    const next = [...list];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    const updates = next.map((p, i) => ({ ...p, sortOrder: i }));
     await db.products.bulkPut(updates);
   }
 
@@ -205,18 +217,13 @@ export default function Products() {
                   · {inCategory.length}
                 </span>
               </div>
-              {inCategory.map((p, i) => (
-                <ProductCard
-                  key={p.id}
-                  product={p}
-                  sensitiveSet={userSensitiveSet}
-                  onEdit={() => setEditing(p)}
-                  onDelete={() => db.products.delete(p.id!)}
-                  canMoveUp={i > 0}
-                  canMoveDown={i < inCategory.length - 1}
-                  onMove={(dir) => moveProduct(inCategory, i, dir)}
-                />
-              ))}
+              <SortableProductList
+                items={inCategory}
+                sensitiveSet={userSensitiveSet}
+                onEdit={(p) => setEditing(p)}
+                onDelete={(p) => db.products.delete(p.id!)}
+                onReorder={(from, to) => reorderInCategory(inCategory, from, to)}
+              />
             </div>
           );
         })
@@ -468,23 +475,75 @@ function MultiScanModal({
   );
 }
 
+function SortableProductList({
+  items,
+  sensitiveSet,
+  onEdit,
+  onDelete,
+  onReorder,
+}: {
+  items: Product[];
+  sensitiveSet: Set<string>;
+  onEdit: (p: Product) => void;
+  onDelete: (p: Product) => void;
+  onReorder: (fromIndex: number, toIndex: number) => void;
+}) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
+  );
+  const ids = items.map((p) => p.id!);
+
+  function onDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const from = ids.indexOf(active.id as number);
+    const to = ids.indexOf(over.id as number);
+    if (from < 0 || to < 0) return;
+    onReorder(from, to);
+    // arrayMove imported but unused — silenced.
+    void arrayMove;
+  }
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+        <div className="space-y-2">
+          {items.map((p) => (
+            <ProductCard
+              key={p.id}
+              product={p}
+              sensitiveSet={sensitiveSet}
+              onEdit={() => onEdit(p)}
+              onDelete={() => onDelete(p)}
+            />
+          ))}
+        </div>
+      </SortableContext>
+    </DndContext>
+  );
+}
+
 function ProductCard({
   product,
   sensitiveSet,
   onEdit,
   onDelete,
-  canMoveUp,
-  canMoveDown,
-  onMove,
 }: {
   product: Product;
   sensitiveSet: Set<string>;
   onEdit: () => void;
   onDelete: () => void;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
-  onMove: (dir: 'up' | 'down') => void;
 }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: product.id!,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
   const [expanded, setExpanded] = useState(false);
 
   const flags = product.ingredients
@@ -510,75 +569,60 @@ function ProductCard({
   const timeLabel = product.timeOfDay.length === 2 ? 'AM/PM' : product.timeOfDay.join('/').toUpperCase();
 
   return (
-    <section className="card !p-3">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-2 text-left"
-        aria-expanded={expanded}
-      >
-        <ChevronRight
-          size={14}
-          className={`text-glow-500 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-1.5 flex-wrap">
-            {product.brand && (
-              <span className="font-display font-bold text-glow-900 truncate">{product.brand}</span>
-            )}
-            <span className="text-sm text-glow-700 truncate">{product.name}</span>
+    <section ref={setNodeRef} style={style} className="card !p-3">
+      <div className="flex items-center gap-2">
+        <span
+          {...attributes}
+          {...listeners}
+          aria-label="Drag to reorder"
+          className="p-1 rounded-md text-glow-500 hover:text-glow-700 hover:bg-glow-100 cursor-grab active:cursor-grabbing touch-none"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <GripVertical size={16} />
+        </span>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex-1 flex items-center gap-2 text-left min-w-0"
+          aria-expanded={expanded}
+        >
+          <ChevronRight
+            size={14}
+            className={`text-glow-500 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-1.5 flex-wrap">
+              {product.brand && (
+                <span className="font-display font-bold text-glow-900 truncate">{product.brand}</span>
+              )}
+              <span className="text-sm text-glow-700 truncate">{product.name}</span>
+            </div>
+            <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+              <span className="chip text-[10px]">{stepLabel}</span>
+              <span className="text-[10px] text-glow-500">{timeLabel}</span>
+              {product.rating ? (
+                <span className="inline-flex items-center gap-0.5">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Star
+                      key={n}
+                      size={10}
+                      className={
+                        product.rating! >= n
+                          ? 'text-yellow-500 fill-yellow-400'
+                          : 'text-glow-200'
+                      }
+                    />
+                  ))}
+                </span>
+              ) : null}
+              {flags.length > 0 && (
+                <span className="chip-warn text-[10px]" title={`${flags.length} flagged ingredient${flags.length === 1 ? '' : 's'}`}>
+                  <AlertTriangle size={10} /> {flags.length}
+                </span>
+              )}
+            </div>
           </div>
-          <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
-            <span className="chip text-[10px]">{stepLabel}</span>
-            <span className="text-[10px] text-glow-500">{timeLabel}</span>
-            {product.rating ? (
-              <span className="inline-flex items-center gap-0.5">
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <Star
-                    key={n}
-                    size={10}
-                    className={
-                      product.rating! >= n
-                        ? 'text-yellow-500 fill-yellow-400'
-                        : 'text-glow-200'
-                    }
-                  />
-                ))}
-              </span>
-            ) : null}
-            {flags.length > 0 && (
-              <span className="chip-warn text-[10px]" title={`${flags.length} flagged ingredient${flags.length === 1 ? '' : 's'}`}>
-                <AlertTriangle size={10} /> {flags.length}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="flex flex-col items-center shrink-0">
-          <span
-            role="button"
-            tabIndex={canMoveUp ? 0 : -1}
-            aria-label="Move up"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (canMoveUp) onMove('up');
-            }}
-            className={`p-1 rounded-full ${canMoveUp ? 'text-glow-700 hover:bg-glow-100 cursor-pointer' : 'text-glow-200'}`}
-          >
-            <ChevronUp size={14} />
-          </span>
-          <span
-            role="button"
-            tabIndex={canMoveDown ? 0 : -1}
-            aria-label="Move down"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (canMoveDown) onMove('down');
-            }}
-            className={`p-1 rounded-full ${canMoveDown ? 'text-glow-700 hover:bg-glow-100 cursor-pointer' : 'text-glow-200'}`}
-          >
-            <ChevronDown size={14} />
-          </span>
-        </div>
+        </button>
         <div className="flex gap-0.5 shrink-0">
           <span
             role="button"
@@ -619,7 +663,7 @@ function ProductCard({
             <Trash2 size={14} />
           </span>
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div className="mt-3 space-y-3 border-t border-glow-100 pt-3">
