@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Camera, Check, Sun, Moon, Upload } from 'lucide-react';
-import { db, FEEL_TAGS, ZONES, type FeelTag, type PhotoEntry, type Product, type Zone } from '../db/schema';
-import { todayISO, fmtDate, relDays, fmtDateShort } from '../lib/date';
+import { Camera, Check, ChevronLeft, ChevronRight, Sun, Moon, Upload } from 'lucide-react';
+import { db, ZONES, type PhotoEntry, type Product, type Zone } from '../db/schema';
+import { todayISO, fmtDate, relDays, fmtDateShort, shiftDate } from '../lib/date';
 import { makeThumbnail } from '../lib/image';
 import ZonePicker from '../components/ZonePicker';
 import PhotoThumb from '../components/PhotoThumb';
@@ -96,17 +96,49 @@ export default function Today() {
   return (
     <div className="space-y-5">
       <section className="card">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
           <h2 className="font-display text-xl text-glow-800">
             {date === todayISO() ? "Today's check-in" : fmtDate(date)}
           </h2>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="input w-auto text-xs"
-          />
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className="btn-ghost p-2"
+              onClick={() => setDate(shiftDate(date, -1))}
+              aria-label="Previous day"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <input
+              type="date"
+              value={date}
+              max={todayISO()}
+              onChange={(e) => setDate(e.target.value)}
+              className="input w-auto text-xs"
+            />
+            <button
+              type="button"
+              className="btn-ghost p-2"
+              onClick={() => setDate(shiftDate(date, +1))}
+              disabled={date >= todayISO()}
+              aria-label="Next day"
+            >
+              <ChevronRight size={16} />
+            </button>
+            {date !== todayISO() && (
+              <button
+                type="button"
+                className="btn-soft text-[11px] px-2 py-1"
+                onClick={() => setDate(todayISO())}
+              >
+                Today
+              </button>
+            )}
+          </div>
         </div>
+        <p className="text-[11px] text-glow-500 -mt-2 mb-3">
+          Step back through previous days to log products you used or upload old photos.
+        </p>
 
         <label className="label">Zone</label>
         <ZonePicker value={zone} onChange={setZone} />
@@ -179,8 +211,6 @@ export default function Today() {
       )}
 
       {viewing && <PhotoViewer photo={viewing} onClose={() => setViewing(null)} />}
-
-      <FeelTagsSection date={date} />
 
       <section className="card">
         <h3 className="font-display text-lg text-glow-800 mb-3">Captured today</h3>
@@ -277,61 +307,6 @@ function UploadSummaryNote({
         Dismiss
       </button>
     </div>
-  );
-}
-
-function FeelTagsSection({ date }: { date: string }) {
-  const checkin = useLiveQuery(
-    () => db.checkins.where('date').equals(date).first(),
-    [date],
-  );
-  const tags = checkin?.tags ?? [];
-
-  async function toggle(tag: FeelTag) {
-    const next = tags.includes(tag) ? tags.filter((t) => t !== tag) : [...tags, tag];
-    if (checkin?.id) {
-      if (next.length === 0) await db.checkins.delete(checkin.id);
-      else await db.checkins.update(checkin.id, { tags: next });
-    } else if (next.length > 0) {
-      await db.checkins.add({ date, tags: next });
-    }
-  }
-
-  const toneClass = (selected: boolean, tone: 'good' | 'neutral' | 'bad') => {
-    if (!selected) return 'bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50';
-    if (tone === 'good') return 'bg-emerald-100 text-emerald-800 border-emerald-300';
-    if (tone === 'bad') return 'bg-amber-100 text-amber-800 border-amber-300';
-    return 'bg-glow-200 text-glow-900 border-glow-300';
-  };
-
-  return (
-    <section className="card">
-      <h3 className="font-display text-lg text-glow-800 mb-1">How does it feel?</h3>
-      <p className="text-xs text-glow-600 mb-3">Tap any that apply for this day.</p>
-      <div className="flex flex-wrap gap-2">
-        {FEEL_TAGS.map((t) => {
-          const selected = tags.includes(t.id);
-          return (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => toggle(t.id)}
-              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${toneClass(selected, t.tone)}`}
-            >
-              <span
-                className={`flex h-4 w-4 items-center justify-center rounded-full border ${
-                  selected ? 'bg-glow-600 border-glow-600 text-white' : 'border-glow-300 bg-white'
-                }`}
-                aria-hidden
-              >
-                {selected && <Check size={10} />}
-              </span>
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
-    </section>
   );
 }
 
