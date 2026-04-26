@@ -233,73 +233,118 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
 }
 
 function ZoneGuide({ zone }: { zone: Zone }) {
-  const stroke = 'rgba(236, 72, 153, 0.85)';
-  const strokeWidth = 0.6;
+  // One color for the whole overlay so it reads cleanly against any
+  // skin tone / background. Solid white with a faint dark drop-shadow.
+  const C = 'rgba(255,255,255,0.95)';
+  const SW = 0.5;
+  const TEXT_FILL = 'white';
+  const SHADOW = 'drop-shadow(0 0 1px rgba(0,0,0,0.7))';
+
+  // Tiny labeled landmark marker.
+  const Marker = ({ cx, cy, label, dx = 0, dy = -2 }: { cx: number; cy: number; label: string; dx?: number; dy?: number }) => (
+    <g>
+      <circle cx={cx} cy={cy} r="1.6" fill={C} />
+      <circle cx={cx} cy={cy} r="3" fill="none" stroke={C} strokeWidth={SW} />
+      <text
+        x={cx + dx}
+        y={cy + dy}
+        textAnchor="middle"
+        fill={TEXT_FILL}
+        fontSize="3.2"
+        fontWeight="600"
+        style={{ filter: SHADOW }}
+      >
+        {label}
+      </text>
+    </g>
+  );
+
+  const Caption = ({ children, y = 142 }: { children: string; y?: number }) => (
+    <text
+      x="50"
+      y={y}
+      textAnchor="middle"
+      fill={TEXT_FILL}
+      fontSize="3.6"
+      fontWeight="600"
+      style={{ filter: SHADOW }}
+    >
+      {children}
+    </text>
+  );
 
   switch (zone) {
     case 'full':
-      // Large oval covering the whole face + nose vertical + eye horizontal
+      // Big oval — basically as much of the screen as we can without going
+      // off the edges. Eye line at upper third, nose line splits centrally,
+      // chin marker at the bottom of the oval.
       return (
-        <g fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray="2 1.5">
-          <ellipse cx="50" cy="68" rx="30" ry="42" />
-          {/* Vertical nose line — face should be split symmetrically by it */}
-          <line x1="50" y1="26" x2="50" y2="110" strokeDasharray="1.5 1" />
-          {/* Horizontal eye line — eyes sit on this line */}
-          <line x1="22" y1="58" x2="78" y2="58" strokeDasharray="1.5 1" />
-          <text x="50" y="22" textAnchor="middle" fill="white" fillOpacity="0.9" fontSize="3">
-            eye line
-          </text>
-          <text x="50" y="138" textAnchor="middle" fill="white" fillOpacity="0.85" fontSize="3">
-            Line up nose with the vertical line · eyes on the horizontal
-          </text>
+        <g fill="none" stroke={C} strokeWidth={SW} strokeDasharray="2 1.5" style={{ filter: SHADOW }}>
+          <ellipse cx="50" cy="72" rx="46" ry="62" />
+          <line x1="50" y1="14" x2="50" y2="130" strokeDasharray="1.5 1" />
+          <line x1="6" y1="60" x2="94" y2="60" strokeDasharray="1.5 1" />
+          <Marker cx={26} cy={60} label="eye" dy={-4.5} />
+          <Marker cx={74} cy={60} label="eye" dy={-4.5} />
+          <Marker cx={50} cy={84} label="nose" dy={-4.5} />
+          <Marker cx={50} cy={130} label="chin" dy={-4.5} />
+          <Caption>Fit your whole face in the oval</Caption>
         </g>
       );
+
     case 'leftCheek':
-      // Oval shifted right (face turned to show left side)
+      // User turns head ¾ to the right (mirrored selfie shows left side).
+      // Ear sits on the LEFT edge, nose on the right, chin at the bottom.
       return (
-        <g fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray="2 1.5">
-          <ellipse cx="62" cy="68" rx="26" ry="38" />
-          <line x1="22" y1="58" x2="84" y2="58" strokeDasharray="1.5 1" />
-          <text x="50" y="138" textAnchor="middle" fill="white" fillOpacity="0.85" fontSize="3">
-            Turn head ¾ to the right · eyes on the line
-          </text>
+        <g fill="none" stroke={C} strokeWidth={SW} strokeDasharray="2 1.5" style={{ filter: SHADOW }}>
+          <ellipse cx="55" cy="72" rx="42" ry="58" />
+          <line x1="6" y1="60" x2="94" y2="60" strokeDasharray="1.5 1" />
+          <Marker cx={18} cy={66} label="ear" dy={-4.5} />
+          <Marker cx={78} cy={72} label="nose tip" dy={-4.5} />
+          <Marker cx={62} cy={126} label="chin" dy={-4.5} />
+          <Caption>Turn head ¾ to the right · ear on the left, nose on the right</Caption>
         </g>
       );
+
     case 'rightCheek':
+      // Mirror of leftCheek.
       return (
-        <g fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray="2 1.5">
-          <ellipse cx="38" cy="68" rx="26" ry="38" />
-          <line x1="16" y1="58" x2="78" y2="58" strokeDasharray="1.5 1" />
-          <text x="50" y="138" textAnchor="middle" fill="white" fillOpacity="0.85" fontSize="3">
-            Turn head ¾ to the left · eyes on the line
-          </text>
+        <g fill="none" stroke={C} strokeWidth={SW} strokeDasharray="2 1.5" style={{ filter: SHADOW }}>
+          <ellipse cx="45" cy="72" rx="42" ry="58" />
+          <line x1="6" y1="60" x2="94" y2="60" strokeDasharray="1.5 1" />
+          <Marker cx={82} cy={66} label="ear" dy={-4.5} />
+          <Marker cx={22} cy={72} label="nose tip" dy={-4.5} />
+          <Marker cx={38} cy={126} label="chin" dy={-4.5} />
+          <Caption>Turn head ¾ to the left · ear on the right, nose on the left</Caption>
         </g>
       );
+
     case 'forehead':
       return (
-        <g fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray="2 1.5">
-          <rect x="25" y="38" width="50" height="22" rx="3" />
-          <text x="50" y="135" textAnchor="middle" fill="white" fillOpacity="0.85" fontSize="3">
-            Frame just the forehead
-          </text>
+        <g fill="none" stroke={C} strokeWidth={SW} strokeDasharray="2 1.5" style={{ filter: SHADOW }}>
+          <rect x="10" y="30" width="80" height="34" rx="4" />
+          <Marker cx={50} cy={64} label="brow" dy={-4.5} />
+          <Caption>Frame just the forehead</Caption>
         </g>
       );
+
     case 'chin':
       return (
-        <g fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray="2 1.5">
-          <rect x="32" y="86" width="36" height="20" rx="3" />
-          <text x="50" y="135" textAnchor="middle" fill="white" fillOpacity="0.85" fontSize="3">
-            Frame jawline + chin
-          </text>
+        <g fill="none" stroke={C} strokeWidth={SW} strokeDasharray="2 1.5" style={{ filter: SHADOW }}>
+          <rect x="14" y="80" width="72" height="36" rx="4" />
+          <Marker cx={50} cy={80} label="lip line" dy={-4.5} />
+          <Marker cx={50} cy={116} label="chin" dy={-4.5} />
+          <Caption>Frame jawline and chin</Caption>
         </g>
       );
+
     case 'nose':
       return (
-        <g fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray="2 1.5">
-          <rect x="40" y="58" width="20" height="30" rx="3" />
-          <text x="50" y="135" textAnchor="middle" fill="white" fillOpacity="0.85" fontSize="3">
-            Center the nose / T-zone
-          </text>
+        <g fill="none" stroke={C} strokeWidth={SW} strokeDasharray="2 1.5" style={{ filter: SHADOW }}>
+          <rect x="28" y="42" width="44" height="58" rx="4" />
+          <line x1="50" y1="42" x2="50" y2="100" strokeDasharray="1.5 1" />
+          <Marker cx={50} cy={50} label="bridge" dy={-4.5} />
+          <Marker cx={50} cy={88} label="tip" dy={-4.5} />
+          <Caption>Center the nose / T-zone</Caption>
         </g>
       );
   }
