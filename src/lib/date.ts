@@ -28,6 +28,13 @@ export function daysBetween(a: string, b: string): number {
   return Math.round(ms / 86_400_000);
 }
 
+export function shiftDate(iso: string, deltaDays: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  date.setDate(date.getDate() + deltaDays);
+  return todayISO(date);
+}
+
 export function relDays(iso: string): string {
   const diff = daysBetween(iso, todayISO());
   if (diff === 0) return 'today';

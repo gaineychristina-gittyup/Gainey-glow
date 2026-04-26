@@ -243,3 +243,112 @@ export async function classifyPhotoZone(image: Blob): Promise<Zone> {
   }
   return 'full';
 }
+
+// ----- Product recommendations ---------------------------------------------
+
+export interface RecommendedProduct {
+  name: string;
+  brand: string;
+  reason: string;
+  keyIngredients: string[];
+  whereToFind?: string;
+  priceTier?: 'budget' | 'mid' | 'premium';
+}
+
+const RECS_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    recommendations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          brand: { type: 'string' },
+          reason: { type: 'string' },
+          keyIngredients: { type: 'array', items: { type: 'string' } },
+          whereToFind: { type: 'string' },
+          priceTier: { type: 'string', enum: ['budget', 'mid', 'premium'] },
+        },
+        required: ['name', 'brand', 'reason', 'keyIngredients'],
+      },
+    },
+  },
+  required: ['recommendations'],
+};
+
+export interface RecommendationContext {
+  concernLabel: string;
+  alreadyUsing?: string[];   // product display names
+  sensitivities?: string[];  // ingredients
+}
+
+export async function recommendProducts(ctx: RecommendationContext): Promise<RecommendedProduct[]> {
+  const key = getGeminiKey();
+  if (!key) throw new Error('No Gemini API key set. Add one in Settings.');
+  const model = getGeminiModel();
+
+  const prompt = `You are an experienced skincare assistant.
+
+Suggest 4–6 widely available products that target this concern: "${ctx.concernLabel}".
+
+${ctx.alreadyUsing && ctx.alreadyUsing.length
+  ? `The user is already using these — do NOT recommend duplicates or near-clones:
+- ${ctx.alreadyUsing.join('\n- ')}`
+  : ''}
+${ctx.sensitivities && ctx.sensitivities.length
+  ? `Avoid products that prominently feature these ingredients (user sensitivities):
+- ${ctx.sensitivities.join('\n- ')}`
+  : ''}
+
+For each recommendation provide:
+- name: the specific product name (NOT the brand)
+- brand: the brand
+- reason: ONE concise sentence on why it works for this concern
+- keyIngredients: 2–4 short lowercase active ingredient names
+- whereToFind: optional, e.g. "drugstore", "Sephora", "Amazon"
+- priceTier: budget, mid, or premium
+
+Mix price tiers when reasonable. Stick to products commonly available in the US/EU.
+This is informational, not medical advice.`;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model,
+  )}:generateContent?key=${encodeURIComponent(key)}`;
+
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: RECS_RESPONSE_SCHEMA,
+      temperature: 0.4,
+    },
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = `Gemini request failed (${res.status})`;
+    try {
+      const j = JSON.parse(text);
+      if (j?.error?.message) msg = j.error.message;
+    } catch {
+      // keep default
+    }
+    if (res.status === 400 && /api key/i.test(msg)) msg = 'API key not valid. Check it in Settings.';
+    else if (res.status === 429) msg = 'Gemini rate limit reached. Wait a minute and try again.';
+    throw new Error(msg);
+  }
+
+  const json = await res.json();
+  const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Gemini returned no recommendations.');
+  const parsed = JSON.parse(text);
+  const list: RecommendedProduct[] = Array.isArray(parsed?.recommendations) ? parsed.recommendations : [];
+  return list.filter((r) => r && r.name && r.brand);
+}
