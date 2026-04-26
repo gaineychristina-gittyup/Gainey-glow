@@ -353,6 +353,123 @@ This is informational, not medical advice.`;
   return list.filter((r) => r && r.name && r.brand);
 }
 
+// ----- Routine layering order ----------------------------------------------
+
+export interface LayeringStep {
+  productId: number;
+  reason: string;        // 1-line why this position
+  waitMinutesAfter: number; // minutes to wait before the next step
+}
+
+export interface LayeringPlan {
+  order: LayeringStep[];
+  notes: string[];
+}
+
+const LAYERING_SCHEMA = {
+  type: 'object',
+  properties: {
+    order: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          productId: { type: 'number' },
+          reason: { type: 'string' },
+          waitMinutesAfter: { type: 'number' },
+        },
+        required: ['productId', 'reason', 'waitMinutesAfter'],
+      },
+    },
+    notes: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['order', 'notes'],
+};
+
+export async function askLayeringOrder(opts: {
+  period: 'am' | 'pm';
+  products: {
+    id: number;
+    name: string;
+    brand?: string;
+    step: string;
+    ingredients: string[];
+  }[];
+}): Promise<LayeringPlan> {
+  const key = getGeminiKey();
+  if (!key) throw new Error('No Gemini API key set. Add one in Settings.');
+  const model = getGeminiModel();
+
+  const productLines = opts.products.map(
+    (p) =>
+      `- id ${p.id}: [${p.step}] ${p.name}${p.brand ? ' — ' + p.brand : ''}${
+        p.ingredients.length ? ' · ingredients: ' + p.ingredients.join(', ') : ''
+      }`,
+  );
+
+  const prompt = `You are advising on the optimal layering order for a skincare routine.
+
+Period: ${opts.period.toUpperCase()}
+
+Products available (use their numeric ids verbatim in your response):
+${productLines.join('\n')}
+
+Return:
+- order: an array of every product id from above in the correct application
+  sequence. For each step include:
+    - productId (number, copied from the list above)
+    - reason: ONE concise sentence (e.g. "thinnest watery toner first to
+      prep skin")
+    - waitMinutesAfter: integer minutes to wait before the next step
+      (0 if no wait needed; common values 1-3 for actives, 5-20 for strong
+      ones like vitamin C before retinol).
+- notes: 1-3 short tips specific to this routine (e.g. "skip the AHA on
+  retinol nights").
+
+For the AM, finish with sunscreen if any. For the PM, follow standard
+thinnest-to-thickest ordering with actives near the start.`;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model,
+  )}:generateContent?key=${encodeURIComponent(key)}`;
+
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: LAYERING_SCHEMA,
+      temperature: 0.3,
+    },
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = `Gemini request failed (${res.status})`;
+    try {
+      const j = JSON.parse(text);
+      if (j?.error?.message) msg = j.error.message;
+    } catch {
+      // keep default
+    }
+    if (res.status === 400 && /api key/i.test(msg)) msg = 'API key not valid. Check it in Settings.';
+    else if (res.status === 429) msg = 'Gemini rate limit reached. Wait a minute and try again.';
+    throw new Error(msg);
+  }
+  const json = await res.json();
+  const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Gemini returned no plan.');
+  const parsed = JSON.parse(text);
+  return {
+    order: Array.isArray(parsed?.order) ? parsed.order : [],
+    notes: Array.isArray(parsed?.notes) ? parsed.notes : [],
+  };
+}
+
 // ----- Pre-treatment guidance ----------------------------------------------
 
 export interface PreTreatmentPlan {
