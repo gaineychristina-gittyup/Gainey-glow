@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
   CalendarClock,
@@ -7,14 +7,17 @@ import {
   ChevronUp,
   CircleStop,
   FlaskConical,
+  Images,
   Plus,
   Sparkles,
+  Trash2,
 } from 'lucide-react';
 import {
   db,
   ZONES,
   TREATMENT_TYPES,
   PRODUCT_STEPS,
+  type Comparison,
   type PhotoEntry,
   type Treatment,
 } from '../db/schema';
@@ -33,9 +36,10 @@ type Event =
   | { kind: 'photo'; date: string; sortKey: number; photos: PhotoEntry[]; sinceTreatment?: SinceTreatment }
   | { kind: 'product-start'; date: string; sortKey: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
   | { kind: 'product-stop'; date: string; sortKey: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
-  | { kind: 'treatment'; date: string; sortKey: number; treatment: Treatment };
+  | { kind: 'treatment'; date: string; sortKey: number; treatment: Treatment }
+  | { kind: 'comparison'; date: string; sortKey: number; comparison: Comparison; sinceTreatment?: SinceTreatment };
 
-type Filter = 'all' | 'photos' | 'products' | 'treatments';
+type Filter = 'all' | 'photos' | 'products' | 'treatments' | 'comparisons';
 
 const NEW_TREATMENT: Treatment = { type: 'facial', date: todayISO() };
 
@@ -45,9 +49,11 @@ export default function Timeline() {
   const [filter, setFilter] = useState<Filter>('all');
   const [compact, setCompact] = useState(false);
 
+  const [viewingComparison, setViewingComparison] = useState<Comparison | null>(null);
   const photos = useLiveQuery(() => db.photos.toArray(), []);
   const products = useLiveQuery(() => db.products.toArray(), []);
   const treatments = useLiveQuery(() => db.treatments.toArray(), []);
+  const comparisons = useLiveQuery(() => db.comparisons.toArray(), []);
 
   const events: Event[] = useMemo(() => {
     const out: Event[] = [];
@@ -109,8 +115,19 @@ export default function Timeline() {
       });
     });
 
+    (comparisons ?? []).forEach((c) => {
+      out.push({
+        kind: 'comparison',
+        date: c.date,
+        // Saved comparisons sort just below photos for the same date
+        sortKey: dateKey(c.date) + 0.05,
+        comparison: c,
+        sinceTreatment: lastTreatmentBefore(c.date),
+      });
+    });
+
     return out.sort((a, b) => b.sortKey - a.sortKey);
-  }, [photos, products, treatments]);
+  }, [photos, products, treatments, comparisons]);
 
   const filtered = useMemo(() => {
     return events.filter((e) => {
@@ -118,6 +135,7 @@ export default function Timeline() {
       if (filter === 'photos') return e.kind === 'photo';
       if (filter === 'treatments') return e.kind === 'treatment';
       if (filter === 'products') return e.kind === 'product-start' || e.kind === 'product-stop';
+      if (filter === 'comparisons') return e.kind === 'comparison';
       return true;
     });
   }, [events, filter]);
@@ -137,6 +155,7 @@ export default function Timeline() {
     { id: 'photos', label: 'Photos' },
     { id: 'products', label: 'Products' },
     { id: 'treatments', label: 'Treatments' },
+    { id: 'comparisons', label: 'Compares' },
   ];
 
   return (
@@ -241,6 +260,7 @@ export default function Timeline() {
                   compact={compact}
                   onPhoto={setViewing}
                   onEditTreatment={setEditingTreatment}
+                  onOpenComparison={setViewingComparison}
                 />
               </li>
             ))}
@@ -249,6 +269,12 @@ export default function Timeline() {
       )}
 
       {viewing && <PhotoViewer photo={viewing} onClose={() => setViewing(null)} />}
+      {viewingComparison && (
+        <ComparisonViewer
+          comparison={viewingComparison}
+          onClose={() => setViewingComparison(null)}
+        />
+      )}
 
       {editingTreatment && (
         <TreatmentEditor
@@ -276,11 +302,13 @@ function TimelineCard({
   compact,
   onPhoto,
   onEditTreatment,
+  onOpenComparison,
 }: {
   event: Event;
   compact: boolean;
   onPhoto: (p: PhotoEntry) => void;
   onEditTreatment: (t: Treatment) => void;
+  onOpenComparison: (c: Comparison) => void;
 }) {
   const since = event.kind === 'treatment' ? undefined : event.sinceTreatment;
   return (
@@ -301,7 +329,13 @@ function TimelineCard({
         <Badge kind={event.kind} />
       </div>
       <div className={compact ? 'mt-1' : 'mt-2'}>
-        <Body event={event} compact={compact} onPhoto={onPhoto} onEditTreatment={onEditTreatment} />
+        <Body
+          event={event}
+          compact={compact}
+          onPhoto={onPhoto}
+          onEditTreatment={onEditTreatment}
+          onOpenComparison={onOpenComparison}
+        />
       </div>
     </div>
   );
@@ -333,6 +367,12 @@ function Badge({ kind }: { kind: Event['kind'] }) {
           <Sparkles size={12} /> Treatment
         </span>
       );
+    case 'comparison':
+      return (
+        <span className="chip">
+          <Images size={12} /> Comparison
+        </span>
+      );
   }
 }
 
@@ -341,11 +381,13 @@ function Body({
   compact,
   onPhoto,
   onEditTreatment,
+  onOpenComparison,
 }: {
   event: Event;
   compact: boolean;
   onPhoto: (p: PhotoEntry) => void;
   onEditTreatment: (t: Treatment) => void;
+  onOpenComparison: (c: Comparison) => void;
 }) {
   switch (event.kind) {
     case 'photo':
@@ -358,16 +400,16 @@ function Body({
         );
       }
       return (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5">
           {event.photos.map((p) => (
             <button
               key={p.id}
               type="button"
               onClick={() => onPhoto(p)}
-              className="relative block focus:outline-none focus:ring-2 focus:ring-glow-500 rounded-xl"
+              className="relative block focus:outline-none focus:ring-2 focus:ring-glow-500 rounded-lg"
             >
-              <PhotoThumb blob={p.thumb} className="aspect-square w-full object-cover rounded-xl" />
-              <span className="absolute bottom-1 left-1 chip text-[10px] bg-white/90">
+              <PhotoThumb blob={p.thumb} className="aspect-square w-full object-cover rounded-lg" />
+              <span className="absolute bottom-0.5 left-0.5 rounded-full bg-white/90 text-glow-800 text-[9px] px-1.5 py-0.5 font-medium">
                 {ZONES.find((z) => z.id === p.zone)?.label ?? p.zone}
               </span>
             </button>
@@ -387,7 +429,130 @@ function Body({
       );
     case 'treatment':
       return <TreatmentBody treatment={event.treatment} compact={compact} onEdit={onEditTreatment} />;
+    case 'comparison':
+      return (
+        <ComparisonBody
+          comparison={event.comparison}
+          compact={compact}
+          onOpen={onOpenComparison}
+        />
+      );
   }
+}
+
+function ComparisonBody({
+  comparison,
+  compact,
+  onOpen,
+}: {
+  comparison: Comparison;
+  compact: boolean;
+  onOpen: (c: Comparison) => void;
+}) {
+  if (compact) {
+    return (
+      <button
+        type="button"
+        className="text-xs text-glow-700 hover:underline text-left"
+        onClick={() => onOpen(comparison)}
+      >
+        {comparison.caption || `Comparison · ${ZONES.find((z) => z.id === comparison.zone)?.label}`}
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(comparison)}
+      className="block w-full text-left focus:outline-none focus:ring-2 focus:ring-glow-500 rounded-xl"
+    >
+      <PhotoThumb
+        blob={comparison.preview}
+        className="w-full max-h-72 object-cover rounded-xl"
+      />
+      {comparison.caption && (
+        <div className="text-xs text-glow-700 italic mt-1.5">{comparison.caption}</div>
+      )}
+      <div className="text-[11px] text-glow-500 mt-0.5">
+        {ZONES.find((z) => z.id === comparison.zone)?.label}
+        {comparison.referenceLabel ? ` · vs. ${comparison.referenceLabel}` : ''}
+      </div>
+    </button>
+  );
+}
+
+function ComparisonViewer({
+  comparison,
+  onClose,
+}: {
+  comparison: Comparison;
+  onClose: () => void;
+}) {
+  const [src, setSrc] = useState<string>();
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    const url = URL.createObjectURL(comparison.preview);
+    setSrc(url);
+    return () => URL.revokeObjectURL(url);
+  }, [comparison.preview]);
+
+  async function del() {
+    if (!comparison.id) return;
+    await db.comparisons.delete(comparison.id);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
+      <div className="flex items-center justify-between px-3 py-2 text-white">
+        <div className="flex flex-col">
+          <span className="text-sm font-semibold">{fmtDate(comparison.date)}</span>
+          <span className="text-[11px] opacity-80">
+            {ZONES.find((z) => z.id === comparison.zone)?.label}
+            {comparison.referenceLabel ? ` · ${comparison.referenceLabel}` : ''}
+          </span>
+        </div>
+        <button onClick={onClose} aria-label="Close" className="p-2 rounded-full hover:bg-white/10">
+          ✕
+        </button>
+      </div>
+      <div className="flex-1 flex items-center justify-center px-3">
+        {src && <img src={src} alt="" className="max-h-full max-w-full rounded-xl" />}
+      </div>
+      {comparison.caption && (
+        <div className="px-4 py-2 text-sm text-white/90 italic max-h-24 overflow-y-auto text-center">
+          {comparison.caption}
+        </div>
+      )}
+      <div className="bg-black flex items-center justify-end px-3 py-3 gap-2">
+        {confirming ? (
+          <>
+            <span className="text-xs text-white/80 mr-2">Delete this comparison?</span>
+            <button
+              className="rounded-full px-4 py-2 text-sm font-medium bg-white/15 text-white hover:bg-white/25"
+              onClick={() => setConfirming(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="rounded-full px-4 py-2 text-sm font-medium bg-red-600 text-white hover:bg-red-700"
+              onClick={del}
+            >
+              Delete
+            </button>
+          </>
+        ) : (
+          <button
+            className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium bg-red-600/90 text-white hover:bg-red-600"
+            onClick={() => setConfirming(true)}
+          >
+            <Trash2 size={16} /> Delete
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function TreatmentBody({

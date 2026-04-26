@@ -90,7 +90,7 @@ export function TreatmentEditor({
               placeholder="e.g. Halo Laser session 1"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Date</label>
               <input
@@ -126,46 +126,41 @@ export function TreatmentEditor({
             <AftercareList plan={plan} />
           </div>
 
-          <div className="flex items-center justify-between gap-2 pt-2">
-            {initial.id ? (
-              confirmingDelete ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-red-700">Delete?</span>
-                  <button
-                    type="button"
-                    className="btn-ghost text-xs px-2 py-1"
-                    onClick={() => setConfirmingDelete(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-full bg-red-600 text-white text-xs font-medium px-3 py-1"
-                    onClick={del}
-                  >
-                    Confirm
-                  </button>
-                </div>
-              ) : (
+          <div className="pt-2 flex flex-wrap items-center gap-2 justify-end">
+            {initial.id && !confirmingDelete && (
+              <button
+                type="button"
+                className="btn-ghost text-red-600 mr-auto"
+                onClick={() => setConfirmingDelete(true)}
+              >
+                <Trash2 size={14} /> Delete
+              </button>
+            )}
+            {initial.id && confirmingDelete && (
+              <div className="flex items-center gap-1.5 mr-auto">
+                <span className="text-xs text-red-700">Delete?</span>
                 <button
                   type="button"
-                  className="btn-ghost text-red-600"
-                  onClick={() => setConfirmingDelete(true)}
+                  className="btn-ghost text-xs px-2 py-1"
+                  onClick={() => setConfirmingDelete(false)}
                 >
-                  <Trash2 size={14} /> Delete
+                  No
                 </button>
-              )
-            ) : (
-              <span />
+                <button
+                  type="button"
+                  className="rounded-full bg-red-600 text-white text-xs font-medium px-3 py-1"
+                  onClick={del}
+                >
+                  Yes
+                </button>
+              </div>
             )}
-            <div className="flex gap-2">
-              <button type="button" className="btn-ghost" onClick={onClose}>
-                Cancel
-              </button>
-              <button type="button" className="btn-primary" onClick={() => onSave(draft)}>
-                Save
-              </button>
-            </div>
+            <button type="button" className="btn-ghost" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="button" className="btn-primary" onClick={() => onSave(draft)}>
+              Save
+            </button>
           </div>
         </div>
       </div>

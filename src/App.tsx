@@ -60,7 +60,7 @@ export default function App() {
         className="fixed bottom-0 inset-x-0 z-30 border-t border-glow-100 bg-white/90 backdrop-blur"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
-        <ul className="max-w-3xl mx-auto grid grid-cols-6">
+        <ul className="max-w-3xl mx-auto grid grid-cols-5">
           {NAV.map(({ to, label, icon: Icon, end }) => (
             <li key={to}>
               <NavLink
