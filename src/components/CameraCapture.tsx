@@ -2,8 +2,9 @@
 // framing guides. Lets the user line up the same shot every day.
 
 import { useEffect, useRef, useState } from 'react';
-import { Camera, RefreshCcw, X } from 'lucide-react';
-import { ZONES, type Zone } from '../db/schema';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { Camera, Eye, EyeOff, RefreshCcw, X } from 'lucide-react';
+import { db, ZONES, type Zone } from '../db/schema';
 
 interface Props {
   zone: Zone;
@@ -17,6 +18,27 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
   const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [ghost, setGhost] = useState(true);
+  const [ghostOpacity, setGhostOpacity] = useState(0.4);
+  const [ghostUrl, setGhostUrl] = useState<string | null>(null);
+
+  // Most recent photo for the selected zone, used as a "ghost" overlay so
+  // the user can frame the shot the same way every day.
+  const reference = useLiveQuery(async () => {
+    const all = await db.photos.where('zone').equals(zone).toArray();
+    if (all.length === 0) return undefined;
+    return all.reduce((a, b) => (a.takenAt > b.takenAt ? a : b));
+  }, [zone]);
+
+  useEffect(() => {
+    if (!reference) {
+      setGhostUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(reference.blob);
+    setGhostUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [reference]);
 
   useEffect(() => {
     let mounted = true;
@@ -84,13 +106,25 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
         <div className="text-xs uppercase tracking-wide opacity-80">
           {ZONES.find((z) => z.id === zone)?.label}
         </div>
-        <button
-          onClick={() => setFacing((f) => (f === 'user' ? 'environment' : 'user'))}
-          aria-label="Switch camera"
-          className="p-2 rounded-full hover:bg-white/10"
-        >
-          <RefreshCcw size={18} />
-        </button>
+        <div className="flex items-center gap-1">
+          {ghostUrl && (
+            <button
+              onClick={() => setGhost((g) => !g)}
+              aria-label={ghost ? 'Hide previous photo overlay' : 'Show previous photo overlay'}
+              title="Toggle previous-photo overlay"
+              className="p-2 rounded-full hover:bg-white/10"
+            >
+              {ghost ? <Eye size={18} /> : <EyeOff size={18} />}
+            </button>
+          )}
+          <button
+            onClick={() => setFacing((f) => (f === 'user' ? 'environment' : 'user'))}
+            aria-label="Switch camera"
+            className="p-2 rounded-full hover:bg-white/10"
+          >
+            <RefreshCcw size={18} />
+          </button>
+        </div>
       </div>
 
       {/* Viewfinder */}
@@ -103,6 +137,19 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
             facing === 'user' ? 'scale-x-[-1]' : ''
           }`}
         />
+
+        {/* Ghost overlay: previous photo for this zone, semi-transparent */}
+        {ghostUrl && ghost && (
+          <img
+            src={ghostUrl}
+            alt=""
+            aria-hidden
+            className={`absolute inset-0 w-full h-full object-cover pointer-events-none mix-blend-screen ${
+              facing === 'user' ? 'scale-x-[-1]' : ''
+            }`}
+            style={{ opacity: ghostOpacity }}
+          />
+        )}
 
         {!ready && !error && (
           <div className="absolute inset-0 flex items-center justify-center text-white/80 text-sm">
@@ -156,7 +203,24 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
       </div>
 
       {/* Capture */}
-      <div className="bg-black flex items-center justify-center py-5">
+      <div className="bg-black flex flex-col items-center justify-center py-4 gap-3">
+        {ghostUrl && ghost && (
+          <div className="flex items-center gap-2 text-white/80 text-[11px] w-full max-w-xs px-4">
+            <span className="shrink-0">Ghost</span>
+            <input
+              type="range"
+              min={10}
+              max={75}
+              value={Math.round(ghostOpacity * 100)}
+              onChange={(e) => setGhostOpacity(Number(e.target.value) / 100)}
+              className="flex-1 accent-pink-400"
+              aria-label="Ghost overlay opacity"
+            />
+            <span className="shrink-0 tabular-nums w-8 text-right">
+              {Math.round(ghostOpacity * 100)}%
+            </span>
+          </div>
+        )}
         <button
           onClick={snap}
           aria-label="Capture"

@@ -46,7 +46,7 @@ export default function App() {
         </button>
       </header>
 
-      <main className="flex-1 px-4 pb-28 max-w-3xl w-full mx-auto">
+      <main className="flex-1 px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] max-w-3xl w-full mx-auto">
         <Routes>
           <Route path="/" element={<Today />} />
           <Route path="/compare" element={<Compare />} />
@@ -59,7 +59,10 @@ export default function App() {
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
 
-      <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-glow-100 bg-white/90 backdrop-blur">
+      <nav
+        className="fixed bottom-0 inset-x-0 z-30 border-t border-glow-100 bg-white/90 backdrop-blur"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
         <ul className="max-w-3xl mx-auto grid grid-cols-6">
           {NAV.map(({ to, label, icon: Icon, end }) => (
             <li key={to}>
