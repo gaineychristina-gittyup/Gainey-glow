@@ -11,7 +11,6 @@ import {
   Images,
   Plus,
   Sparkles,
-  Star,
   Trash2,
 } from 'lucide-react';
 import {
@@ -41,10 +40,9 @@ type Event =
   | { kind: 'product-start'; date: string; sortKey: number; productId?: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
   | { kind: 'product-stop'; date: string; sortKey: number; productId?: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
   | { kind: 'treatment'; date: string; sortKey: number; treatment: Treatment }
-  | { kind: 'comparison'; date: string; sortKey: number; comparison: Comparison; sinceTreatment?: SinceTreatment }
-  | { kind: 'rating'; date: string; sortKey: number; rating: number; notes?: string; sinceTreatment?: SinceTreatment };
+  | { kind: 'comparison'; date: string; sortKey: number; comparison: Comparison; sinceTreatment?: SinceTreatment };
 
-type Filter = 'all' | 'photos' | 'products' | 'treatments' | 'comparisons' | 'ratings';
+type Filter = 'all' | 'photos' | 'products' | 'treatments' | 'comparisons';
 
 const NEW_TREATMENT: Treatment = { type: 'facial', date: todayISO() };
 
@@ -58,7 +56,6 @@ const TYPE_STYLE: Record<
   'product-stop': { dot: 'bg-amber-500', chip: 'bg-amber-100', chipText: 'text-amber-800' },
   treatment: { dot: 'bg-violet-500', chip: 'bg-violet-100', chipText: 'text-violet-800' },
   comparison: { dot: 'bg-rose-500', chip: 'bg-rose-100', chipText: 'text-rose-800' },
-  rating: { dot: 'bg-yellow-500', chip: 'bg-yellow-100', chipText: 'text-yellow-800' },
 };
 
 export default function Timeline() {
@@ -108,8 +105,6 @@ export default function Timeline() {
   const products = useLiveQuery(() => db.products.toArray(), []);
   const treatments = useLiveQuery(() => db.treatments.toArray(), []);
   const comparisons = useLiveQuery(() => db.comparisons.toArray(), []);
-  const ratings = useLiveQuery(() => db.skinRatings.toArray(), []);
-
   const events: Event[] = useMemo(() => {
     const out: Event[] = [];
 
@@ -183,20 +178,8 @@ export default function Timeline() {
       });
     });
 
-    (ratings ?? []).forEach((r) => {
-      out.push({
-        kind: 'rating',
-        date: r.date,
-        // Ratings sort above photos for the same date.
-        sortKey: dateKey(r.date) + 0.1,
-        rating: r.rating,
-        notes: r.notes,
-        sinceTreatment: lastTreatmentBefore(r.date),
-      });
-    });
-
     return out.sort((a, b) => b.sortKey - a.sortKey);
-  }, [photos, products, treatments, comparisons, ratings]);
+  }, [photos, products, treatments, comparisons]);
 
   const filtered = useMemo(() => {
     return events.filter((e) => {
@@ -205,7 +188,6 @@ export default function Timeline() {
       if (filter === 'treatments') return e.kind === 'treatment';
       if (filter === 'products') return e.kind === 'product-start' || e.kind === 'product-stop';
       if (filter === 'comparisons') return e.kind === 'comparison';
-      if (filter === 'ratings') return e.kind === 'rating';
       return true;
     });
   }, [events, filter]);
@@ -234,7 +216,6 @@ export default function Timeline() {
     { id: 'products', label: 'Products' },
     { id: 'treatments', label: 'Treatments' },
     { id: 'comparisons', label: 'Compares' },
-    { id: 'ratings', label: 'Ratings' },
   ];
 
   return (
@@ -362,7 +343,6 @@ export default function Timeline() {
           onOpenComparison={setViewingComparison}
           onEditTreatment={setEditingTreatment}
           onEditProduct={(pid) => navigate('/products', { state: { editProductId: pid } })}
-          onEditRating={(d) => navigate('/', { state: { date: d } })}
         />
       ) : filtered.length === 0 ? (
         <div className="card text-sm text-glow-600/80">
@@ -436,10 +416,6 @@ export default function Timeline() {
           onEditProduct={(productId) => {
             setOpenDate(null);
             navigate('/products', { state: { editProductId: productId } });
-          }}
-          onEditRating={(date) => {
-            setOpenDate(null);
-            navigate('/', { state: { date } });
           }}
         />
       )}
@@ -567,8 +543,6 @@ function Badge({ kind }: { kind: Event['kind'] }) {
       return <span className={cls}><Sparkles size={12} /> Treatment</span>;
     case 'comparison':
       return <span className={cls}><Images size={12} /> Comparison</span>;
-    case 'rating':
-      return <span className={cls}><Star size={12} /> Skin rating</span>;
   }
 }
 
@@ -651,54 +625,7 @@ function Body({
           onOpen={onOpenComparison}
         />
       );
-    case 'rating':
-      return <RatingBody rating={event.rating} notes={event.notes} compact={compact} />;
   }
-}
-
-function RatingBody({
-  rating,
-  notes,
-  compact,
-}: {
-  rating: number;
-  notes?: string;
-  compact: boolean;
-}) {
-  const labels = ['Awful', 'Meh', 'OK', 'Good', 'Glowing'];
-  if (compact) {
-    return (
-      <div className="text-xs text-glow-700">
-        {rating > 0 ? `${rating}/5 · ${labels[rating - 1]}` : 'Note'}
-        {notes ? ` · ${notes.slice(0, 60)}${notes.length > 60 ? '…' : ''}` : ''}
-      </div>
-    );
-  }
-  return (
-    <div className="text-sm">
-      {rating > 0 && (
-        <div className="flex items-center gap-2">
-          <div className="flex gap-0.5">
-            {[1, 2, 3, 4, 5].map((n) => (
-              <Star
-                key={n}
-                size={16}
-                className={n <= rating ? 'text-yellow-500 fill-yellow-400' : 'text-glow-200'}
-              />
-            ))}
-          </div>
-          <span className="text-glow-700 text-xs">
-            {rating}/5 · {labels[rating - 1]}
-          </span>
-        </div>
-      )}
-      {notes && (
-        <p className={`text-xs text-glow-800 italic whitespace-pre-wrap ${rating > 0 ? 'mt-1.5' : ''}`}>
-          {notes}
-        </p>
-      )}
-    </div>
-  );
 }
 
 function ComparisonBody({
@@ -1132,7 +1059,6 @@ function CalendarView({
   onOpenComparison,
   onEditTreatment,
   onEditProduct,
-  onEditRating,
 }: {
   months: 3 | 6;
   events: Event[];
@@ -1140,7 +1066,6 @@ function CalendarView({
   onOpenComparison: (c: Comparison) => void;
   onEditTreatment: (t: Treatment) => void;
   onEditProduct: (productId: number) => void;
-  onEditRating: (date: string) => void;
 }) {
   const [openDate, setOpenDate] = useState<string | null>(null);
 
@@ -1185,7 +1110,6 @@ function CalendarView({
             ['product-start', 'Product'],
             ['treatment', 'Treatment'],
             ['comparison', 'Compare'],
-            ['rating', 'Rating'],
           ] as const).map(([k, label]) => (
             <span key={k} className="inline-flex items-center gap-1">
               <span className={`h-2 w-2 rounded-full ${TYPE_STYLE[k].dot}`} />
@@ -1204,7 +1128,6 @@ function CalendarView({
           onOpenComparison={onOpenComparison}
           onEditTreatment={onEditTreatment}
           onEditProduct={onEditProduct}
-          onEditRating={onEditRating}
         />
       )}
     </>
@@ -1251,14 +1174,9 @@ function MonthGrid({
           const dayEvents = byDate.get(iso) ?? [];
           const isFuture = iso > todayISOStr;
           const isToday = iso === todayISOStr;
-          const rating = dayEvents.find((e) => e.kind === 'rating') as
-            | (Event & { kind: 'rating' })
-            | undefined;
-          const ratingBg = rating ? ratingTint(rating.rating) : '';
+          const ratingBg = '';
           // Distinct event-type dots (max 4 visible)
-          const types = Array.from(
-            new Set(dayEvents.map((e) => e.kind).filter((k) => k !== 'rating')),
-          );
+          const types = Array.from(new Set(dayEvents.map((e) => e.kind)));
           return (
             <button
               key={i}
@@ -1293,14 +1211,6 @@ function MonthGrid({
   );
 }
 
-function ratingTint(r: number): string {
-  if (r === 5) return 'bg-emerald-200';
-  if (r === 4) return 'bg-emerald-100';
-  if (r === 3) return 'bg-yellow-100';
-  if (r === 2) return 'bg-amber-200';
-  if (r === 1) return 'bg-red-200';
-  return '';
-}
 
 function DayDetailModal({
   date,
@@ -1310,7 +1220,6 @@ function DayDetailModal({
   onOpenComparison,
   onEditTreatment,
   onEditProduct,
-  onEditRating,
 }: {
   date: string;
   events: Event[];
@@ -1319,7 +1228,6 @@ function DayDetailModal({
   onOpenComparison: (c: Comparison) => void;
   onEditTreatment: (t: Treatment) => void;
   onEditProduct: (productId: number) => void;
-  onEditRating: (date: string) => void;
 }) {
   return (
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/40 p-3">
@@ -1347,13 +1255,6 @@ function DayDetailModal({
                       Edit product
                     </button>
                   ) : null
-                ) : e.kind === 'rating' ? (
-                  <button
-                    className="text-[11px] text-glow-700 underline"
-                    onClick={() => onEditRating(e.date)}
-                  >
-                    Edit rating
-                  </button>
                 ) : null}
               </div>
               <Body
