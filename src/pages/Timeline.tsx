@@ -25,6 +25,8 @@ import {
 } from '../db/schema';
 import { AFTERCARE } from '../data/aftercare';
 import { daysBetween, fmtDate, todayISO } from '../lib/date';
+import { askPreTreatmentGuidance, type PreTreatmentPlan } from '../lib/gemini';
+import { getGeminiKey } from '../lib/settings';
 import PhotoThumb from '../components/PhotoThumb';
 import PhotoViewer from '../components/PhotoViewer';
 import { TreatmentEditor, AftercareList } from '../components/TreatmentEditor';
@@ -218,6 +220,14 @@ export default function Timeline() {
     });
   }, [treatments]);
 
+  const upcomingTreatments = useMemo(() => {
+    if (!treatments) return [];
+    const today = todayISO();
+    return treatments
+      .filter((t) => t.date > today)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [treatments]);
+
   const filters: { id: Filter; label: string }[] = [
     { id: 'all', label: 'All' },
     { id: 'photos', label: 'Photos' },
@@ -306,6 +316,13 @@ export default function Timeline() {
           ))}
         </div>
       </section>
+
+      {upcomingTreatments.length > 0 && (
+        <UpcomingTreatmentsCard
+          treatments={upcomingTreatments}
+          onEdit={setEditingTreatment}
+        />
+      )}
 
       {activeAftercare.length > 0 && (
         <section className="card border-glow-300 bg-glow-50/80">
@@ -844,6 +861,196 @@ function TreatmentBody({
 
 function dateKey(iso: string): number {
   return Number(iso.replace(/-/g, ''));
+}
+
+function UpcomingTreatmentsCard({
+  treatments,
+  onEdit,
+}: {
+  treatments: Treatment[];
+  onEdit: (t: Treatment) => void;
+}) {
+  const [guidanceFor, setGuidanceFor] = useState<Treatment | null>(null);
+  return (
+    <section className="card border-amber-200 bg-amber-50/60">
+      <div className="flex items-center gap-2 text-amber-900 font-display text-lg mb-2">
+        <CalendarClock size={18} /> Upcoming treatments
+      </div>
+      <div className="space-y-3">
+        {treatments.map((t) => {
+          const days = daysBetween(todayISO(), t.date);
+          const label = t.customName || TREATMENT_TYPES.find((x) => x.id === t.type)?.label;
+          return (
+            <div key={t.id} className="rounded-xl bg-white/80 p-3">
+              <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                <button
+                  type="button"
+                  className="font-medium text-glow-900 hover:underline text-left"
+                  onClick={() => onEdit(t)}
+                >
+                  {label}
+                </button>
+                <span className="text-[11px] text-glow-700">
+                  in {days} day{days === 1 ? '' : 's'} · {fmtDate(t.date)}
+                </span>
+              </div>
+              {t.provider && (
+                <div className="text-xs text-glow-600 mt-0.5">{t.provider}</div>
+              )}
+              <button
+                type="button"
+                onClick={() => setGuidanceFor(t)}
+                className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-600 text-white text-xs font-medium px-3 py-1.5 hover:bg-amber-700"
+              >
+                <Sparkles size={12} /> Pre-treatment guidance (AI)
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {guidanceFor && (
+        <PreTreatmentGuidanceModal
+          treatment={guidanceFor}
+          onClose={() => setGuidanceFor(null)}
+        />
+      )}
+    </section>
+  );
+}
+
+function PreTreatmentGuidanceModal({
+  treatment,
+  onClose,
+}: {
+  treatment: Treatment;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [plan, setPlan] = useState<PreTreatmentPlan | null>(null);
+
+  const products = useLiveQuery(() => db.products.toArray(), []);
+  const sensitivities = useLiveQuery(() => db.sensitivities.toArray(), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (!getGeminiKey()) {
+        setError('Add your Gemini API key in Settings first (gear icon, top right).');
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const today = todayISO();
+        const active = (products ?? []).filter(
+          (p) => p.startedOn <= today && (!p.stoppedOn || p.stoppedOn >= today),
+        );
+        const result = await askPreTreatmentGuidance({
+          treatmentName:
+            treatment.customName ||
+            TREATMENT_TYPES.find((x) => x.id === treatment.type)?.label ||
+            'Treatment',
+          treatmentDate: treatment.date,
+          daysAway: daysBetween(today, treatment.date),
+          activeProducts: active.map((p) => ({
+            name: p.name,
+            brand: p.brand,
+            ingredients: p.ingredients,
+          })),
+          sensitivities: (sensitivities ?? []).map((s) => s.ingredient),
+        });
+        if (!cancelled) setPlan(result);
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : 'Failed to get guidance.');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    if (products && sensitivities) void run();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products, sensitivities]);
+
+  const label =
+    treatment.customName || TREATMENT_TYPES.find((x) => x.id === treatment.type)?.label;
+  return (
+    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/40 p-3">
+      <div className="card w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-display text-lg text-glow-800 flex items-center gap-1.5">
+            <Sparkles size={16} className="text-glow-600" /> Before {label}
+          </h3>
+          <button className="btn-ghost text-xs" onClick={onClose}>Close</button>
+        </div>
+        <p className="text-xs text-glow-600 mb-3">
+          AI suggestions based on your active routine. Defer to your provider's specific
+          instructions — this is informational, not medical advice.
+        </p>
+
+        {loading && (
+          <div className="flex items-center gap-2 text-sm text-glow-700 py-6 justify-center">
+            Asking Gemini…
+          </div>
+        )}
+
+        {error && (
+          <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-800">
+            {error}
+          </div>
+        )}
+
+        {plan && (
+          <div className="space-y-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-glow-700 mb-1">
+                Pause these
+              </div>
+              {plan.productsToPause.length === 0 ? (
+                <p className="text-sm text-glow-600/80">
+                  Nothing in your routine needs to be paused for this treatment.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {plan.productsToPause.map((p, i) => (
+                    <li key={i} className="rounded-xl bg-glow-50 p-3">
+                      <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                        <span className="font-medium text-glow-900">{p.name}</span>
+                        <span className="text-xs text-amber-700 font-semibold">
+                          stop {p.daysBefore}d before
+                        </span>
+                      </div>
+                      <p className="text-xs text-glow-700 mt-0.5">{p.reason}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {plan.generalAdvice.length > 0 && (
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-glow-700 mb-1">
+                  General tips
+                </div>
+                <ul className="list-disc pl-4 space-y-1 text-sm text-glow-800">
+                  {plan.generalAdvice.map((a, i) => (
+                    <li key={i}>{a}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-4 flex justify-end">
+          <button className="btn-primary" onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function YearDivider({ year }: { year: number }) {

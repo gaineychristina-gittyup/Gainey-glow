@@ -353,6 +353,117 @@ This is informational, not medical advice.`;
   return list.filter((r) => r && r.name && r.brand);
 }
 
+// ----- Pre-treatment guidance ----------------------------------------------
+
+export interface PreTreatmentPlan {
+  productsToPause: { name: string; reason: string; daysBefore: number }[];
+  generalAdvice: string[];
+}
+
+const PRE_TREATMENT_SCHEMA = {
+  type: 'object',
+  properties: {
+    productsToPause: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          reason: { type: 'string' },
+          daysBefore: { type: 'number' },
+        },
+        required: ['name', 'reason', 'daysBefore'],
+      },
+    },
+    generalAdvice: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['productsToPause', 'generalAdvice'],
+};
+
+export async function askPreTreatmentGuidance(opts: {
+  treatmentName: string;
+  treatmentDate: string;
+  daysAway: number;
+  activeProducts: { name: string; brand?: string; ingredients: string[] }[];
+  sensitivities: string[];
+}): Promise<PreTreatmentPlan> {
+  const key = getGeminiKey();
+  if (!key) throw new Error('No Gemini API key set. Add one in Settings.');
+  const model = getGeminiModel();
+
+  const productLines = opts.activeProducts.map(
+    (p) =>
+      `- ${p.name}${p.brand ? ' — ' + p.brand : ''}${
+        p.ingredients.length ? ' · ingredients: ' + p.ingredients.join(', ') : ''
+      }`,
+  );
+
+  const prompt = `An esthetician/derm asks for pre-treatment guidance.
+
+Upcoming treatment: ${opts.treatmentName}
+Treatment date: ${opts.treatmentDate} (${opts.daysAway} days from today)
+
+The user's currently-active products:
+${productLines.length ? productLines.join('\n') : '(none)'}
+${
+  opts.sensitivities.length
+    ? `\nSensitivities: ${opts.sensitivities.join(', ')}`
+    : ''
+}
+
+For this treatment, list which of the user's products they should pause
+leading up to it, and how many days before. Use only products from the
+list above. For each item:
+- name: copy the product name verbatim from the list
+- reason: ONE concise sentence explaining why (e.g. "increases sun
+  sensitivity, raises risk of post-laser hyperpigmentation")
+- daysBefore: integer number of days to stop before treatment
+
+Then 2–4 general pre-treatment tips (sun avoidance, no waxing, hydration,
+etc). This is informational, not medical advice — defer to the
+provider's specific instructions.`;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model,
+  )}:generateContent?key=${encodeURIComponent(key)}`;
+
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: PRE_TREATMENT_SCHEMA,
+      temperature: 0.3,
+    },
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = `Gemini request failed (${res.status})`;
+    try {
+      const j = JSON.parse(text);
+      if (j?.error?.message) msg = j.error.message;
+    } catch {
+      // keep default
+    }
+    if (res.status === 400 && /api key/i.test(msg)) msg = 'API key not valid. Check it in Settings.';
+    else if (res.status === 429) msg = 'Gemini rate limit reached. Wait a minute and try again.';
+    throw new Error(msg);
+  }
+  const json = await res.json();
+  const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Gemini returned no guidance.');
+  const parsed = JSON.parse(text);
+  return {
+    productsToPause: Array.isArray(parsed?.productsToPause) ? parsed.productsToPause : [],
+    generalAdvice: Array.isArray(parsed?.generalAdvice) ? parsed.generalAdvice : [],
+  };
+}
+
 // ----- Free-form skincare Q&A ----------------------------------------------
 
 export interface AskContext {
