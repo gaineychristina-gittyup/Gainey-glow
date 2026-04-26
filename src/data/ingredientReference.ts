@@ -3,11 +3,14 @@
 
 import type { Concern } from '../db/schema';
 
+export type Evidence = 'high' | 'moderate' | 'limited';
+
 export interface IngredientInfo {
   name: string;             // canonical lowercase
   aliases?: string[];       // also lowercase
   targets: Concern[];
   cautions?: string[];      // human-readable caution notes
+  evidence?: Evidence;      // strength of clinical research
 }
 
 export const INGREDIENT_LIBRARY: IngredientInfo[] = [
@@ -16,104 +19,126 @@ export const INGREDIENT_LIBRARY: IngredientInfo[] = [
     aliases: ['retinoid', 'retinaldehyde', 'retinyl palmitate', 'tretinoin', 'adapalene'],
     targets: ['aging', 'texture', 'hyperpigmentation', 'acne', 'pores'],
     cautions: ['can irritate sensitive skin', 'not recommended during pregnancy', 'increases sun sensitivity'],
+    evidence: 'high',
   },
   {
     name: 'niacinamide',
     targets: ['redness', 'pores', 'oiliness', 'hyperpigmentation', 'sensitivity'],
+    evidence: 'high',
   },
   {
     name: 'vitamin c',
     aliases: ['ascorbic acid', 'l-ascorbic acid', 'sodium ascorbyl phosphate', 'magnesium ascorbyl phosphate', 'tetrahexyldecyl ascorbate'],
     targets: ['hyperpigmentation', 'sunDamage', 'aging'],
     cautions: ['may sting on broken skin', 'oxidizes — store in cool dark place'],
+    evidence: 'high',
   },
   {
     name: 'azelaic acid',
     targets: ['redness', 'hyperpigmentation', 'acne'],
+    evidence: 'high',
   },
   {
     name: 'salicylic acid',
     aliases: ['bha'],
     targets: ['acne', 'pores', 'oiliness', 'texture'],
     cautions: ['drying with overuse', 'avoid layering with strong retinoids'],
+    evidence: 'high',
   },
   {
     name: 'glycolic acid',
     aliases: ['aha'],
     targets: ['hyperpigmentation', 'texture', 'aging', 'sunDamage'],
     cautions: ['increases sun sensitivity', 'can sting on sensitive skin'],
+    evidence: 'high',
   },
   {
     name: 'lactic acid',
     targets: ['hyperpigmentation', 'texture', 'dryness'],
+    evidence: 'moderate',
   },
   {
     name: 'mandelic acid',
     targets: ['hyperpigmentation', 'acne', 'texture'],
+    evidence: 'moderate',
   },
   {
     name: 'hyaluronic acid',
     aliases: ['sodium hyaluronate'],
     targets: ['dryness', 'aging'],
+    evidence: 'moderate',
   },
   {
     name: 'ceramides',
     targets: ['dryness', 'sensitivity'],
+    evidence: 'high',
   },
   {
     name: 'peptides',
     aliases: ['matrixyl', 'palmitoyl tripeptide-1', 'copper peptides'],
     targets: ['aging', 'texture'],
+    evidence: 'moderate',
   },
   {
     name: 'centella asiatica',
     aliases: ['cica', 'madecassoside'],
     targets: ['redness', 'sensitivity'],
+    evidence: 'moderate',
   },
   {
     name: 'green tea',
     aliases: ['camellia sinensis', 'egcg'],
     targets: ['redness', 'oiliness', 'sensitivity'],
+    evidence: 'moderate',
   },
   {
     name: 'kojic acid',
     targets: ['hyperpigmentation', 'sunDamage'],
     cautions: ['can be sensitizing', 'patch test recommended'],
+    evidence: 'moderate',
   },
   {
     name: 'tranexamic acid',
     targets: ['hyperpigmentation', 'redness'],
+    evidence: 'high',
   },
   {
     name: 'alpha arbutin',
     aliases: ['arbutin'],
     targets: ['hyperpigmentation'],
+    evidence: 'limited',
   },
   {
     name: 'benzoyl peroxide',
     targets: ['acne'],
     cautions: ['bleaches fabric', 'drying', 'avoid with retinoids in same routine'],
+    evidence: 'high',
   },
   {
     name: 'zinc oxide',
-    targets: ['acne', 'sensitivity', 'redness'],
+    targets: ['acne', 'sensitivity', 'redness', 'sunDamage'],
+    evidence: 'high',
   },
   {
     name: 'titanium dioxide',
     targets: ['sunDamage'],
+    evidence: 'high',
   },
   {
     name: 'caffeine',
     targets: ['darkCircles'],
+    evidence: 'limited',
   },
   {
     name: 'squalane',
     targets: ['dryness', 'sensitivity'],
+    evidence: 'moderate',
   },
   {
     name: 'panthenol',
     aliases: ['vitamin b5', 'pro-vitamin b5'],
     targets: ['dryness', 'sensitivity', 'redness'],
+    evidence: 'moderate',
   },
 ];
 

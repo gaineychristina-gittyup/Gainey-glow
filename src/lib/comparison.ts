@@ -53,10 +53,11 @@ export async function renderComparisonPreview(opts: {
 
   drawTransformed(ctx, beforeImg, w, h, beforeTransform, panScale);
 
-  // After image clipped to the slider area, drawn on top.
+  // After image is shown to the RIGHT of the slider (left = Before).
   ctx.save();
   ctx.beginPath();
-  ctx.rect(0, 0, (w * sliderPos) / 100, h);
+  const sliderX = (w * sliderPos) / 100;
+  ctx.rect(sliderX, 0, w - sliderX, h);
   ctx.clip();
   drawTransformed(ctx, afterImg, w, h, afterTransform, panScale);
   ctx.restore();

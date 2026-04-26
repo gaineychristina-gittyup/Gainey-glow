@@ -102,7 +102,7 @@ export default function CompareSlider({
     if (!el) return s.active;
     const rect = el.getBoundingClientRect();
     const xPct = ((clientX - rect.left) / rect.width) * 100;
-    return xPct < s.pos ? 'after' : 'before';
+    return xPct < s.pos ? 'before' : 'after';
   }
 
   function onPointerDown(e: React.PointerEvent) {
@@ -216,6 +216,9 @@ export default function CompareSlider({
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
       >
+        {/* Before fills the whole canvas (left side); After is clipped to the
+            right of the slider via clip-path, so the convention is consistent
+            with most before/after sliders. */}
         <img
           src={before}
           alt="before"
@@ -223,21 +226,17 @@ export default function CompareSlider({
           draggable={false}
           style={beforeStyle}
         />
-        <div
-          className="absolute inset-0 overflow-hidden pointer-events-none"
-          style={{ width: `${s.pos}%` }}
-        >
-          <img
-            src={after}
-            alt="after"
-            className="block h-full w-auto max-w-none object-cover"
-            style={{
-              width: `${10000 / s.pos}%`,
-              ...afterStyle,
-            }}
-            draggable={false}
-          />
-        </div>
+        <img
+          src={after}
+          alt="after"
+          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+          style={{
+            ...afterStyle,
+            clipPath: `inset(0 0 0 ${s.pos}%)`,
+            WebkitClipPath: `inset(0 0 0 ${s.pos}%)`,
+          }}
+          draggable={false}
+        />
         <div
           className="absolute top-0 bottom-0 w-px bg-white/90 shadow-[0_0_8px_rgba(0,0,0,0.4)] pointer-events-none"
           style={{ left: `${s.pos}%` }}

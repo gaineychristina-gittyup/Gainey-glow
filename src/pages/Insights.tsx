@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { AlertTriangle, Beaker, Loader2, Send, Sparkles, Wand2 } from 'lucide-react';
+import { AlertTriangle, Beaker, BookOpen, Loader2, Send, Sparkles, TrendingDown, TrendingUp, Wand2 } from 'lucide-react';
 import { CONCERNS, db, type Concern } from '../db/schema';
-import { COMMON_IRRITANTS, findIngredientInfo, findIrritant } from '../data/ingredientReference';
+import { COMMON_IRRITANTS, INGREDIENT_LIBRARY, findIngredientInfo, findIrritant, type Evidence } from '../data/ingredientReference';
 import { todayISO } from '../lib/date';
 import { askSkincareQuestion } from '../lib/gemini';
 import { getGeminiKey } from '../lib/settings';
@@ -12,6 +12,7 @@ export default function Insights() {
   const sensitivities = useLiveQuery(() => db.sensitivities.toArray(), []);
   const photos = useLiveQuery(() => db.photos.toArray(), []);
   const treatments = useLiveQuery(() => db.treatments.toArray(), []);
+  const ratings = useLiveQuery(() => db.skinRatings.toArray(), []);
 
   const today = todayISO();
   const active = useMemo(
@@ -82,6 +83,83 @@ export default function Insights() {
   }, [active, sensitiveSet]);
 
   const photoStreak = useMemo(() => computeStreak(photos ?? []), [photos]);
+
+  // Per-product correlation: mean rating during the period the product was
+  // active vs. when it wasn't. Requires >= 3 ratings on each side to be shown.
+  const correlations = useMemo(() => {
+    const valid = (ratings ?? []).filter((r) => r.rating > 0);
+    if (valid.length < 6 || !products) return [];
+    return products
+      .map((p) => {
+        const start = p.startedOn;
+        const stop = p.stoppedOn ?? '9999-12-31';
+        const on = valid.filter((r) => r.date >= start && r.date <= stop);
+        const off = valid.filter((r) => r.date < start || r.date > stop);
+        if (on.length < 3 || off.length < 3) return null;
+        const onMean = on.reduce((a, b) => a + b.rating, 0) / on.length;
+        const offMean = off.reduce((a, b) => a + b.rating, 0) / off.length;
+        return {
+          product: p,
+          onMean,
+          offMean,
+          delta: onMean - offMean,
+          nOn: on.length,
+          nOff: off.length,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => !!x)
+      .sort((a, b) => b.delta - a.delta);
+  }, [ratings, products]);
+
+  // Research-backed coverage: for each concern, list user's high/moderate
+  // evidence ingredients targeting it. Recommend a high-evidence pick when
+  // a concern has none.
+  const evidenceByConcern = useMemo(() => {
+    const map = new Map<
+      Concern,
+      {
+        userIngredients: { name: string; evidence: Evidence; products: string[] }[];
+        recommendations: { name: string; evidence: Evidence }[];
+      }
+    >();
+    CONCERNS.forEach((c) => map.set(c.id, { userIngredients: [], recommendations: [] }));
+
+    // Index user's ingredients across active routine.
+    active.forEach((p) => {
+      p.ingredients.forEach((raw) => {
+        const info = findIngredientInfo(raw);
+        if (!info?.evidence) return;
+        info.targets.forEach((t) => {
+          const entry = map.get(t)!;
+          const existing = entry.userIngredients.find((u) => u.name === info.name);
+          if (existing) {
+            if (!existing.products.includes(p.name)) existing.products.push(p.name);
+          } else {
+            entry.userIngredients.push({
+              name: info.name,
+              evidence: info.evidence!,
+              products: [p.name],
+            });
+          }
+        });
+      });
+    });
+
+    // For each concern, build recs from the curated library, filtered to
+    // ingredients the user doesn't already have, prioritizing high evidence.
+    CONCERNS.forEach((c) => {
+      const have = new Set(map.get(c.id)!.userIngredients.map((u) => u.name));
+      const recs = INGREDIENT_LIBRARY.filter(
+        (i) => i.evidence && i.targets.includes(c.id) && !have.has(i.name),
+      )
+        .sort((a, b) => evidenceWeight(b.evidence) - evidenceWeight(a.evidence))
+        .slice(0, 3)
+        .map((i) => ({ name: i.name, evidence: i.evidence! }));
+      map.get(c.id)!.recommendations = recs;
+    });
+
+    return map;
+  }, [active]);
 
   return (
     <div className="space-y-4">
@@ -196,6 +274,127 @@ export default function Insights() {
             })}
           </ul>
         )}
+      </section>
+
+      <section className="card">
+        <h3 className="font-display text-lg text-glow-800 mb-2 flex items-center gap-1.5">
+          <TrendingUp size={16} className="text-emerald-600" /> Product correlations
+        </h3>
+        <p className="text-xs text-glow-600 mb-3">
+          How your skin ratings line up with each product's active period. Observational, not
+          causal — small samples are noisy. Need at least three rated days on and off a product
+          before it shows up here.
+        </p>
+        {correlations.length === 0 ? (
+          <p className="text-sm text-glow-600/80">
+            Keep logging daily ratings — once a product has been rated on three days both with
+            and without it, you'll see a comparison here.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {correlations.slice(0, 8).map((c) => {
+              const positive = c.delta > 0.1;
+              const negative = c.delta < -0.1;
+              return (
+                <li
+                  key={c.product.id}
+                  className="rounded-xl border border-glow-100 bg-white/60 p-3"
+                >
+                  <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                    <span className="font-medium text-glow-900 truncate">{c.product.name}</span>
+                    <span
+                      className={`text-xs font-semibold inline-flex items-center gap-1 ${
+                        positive
+                          ? 'text-emerald-700'
+                          : negative
+                          ? 'text-red-700'
+                          : 'text-glow-600'
+                      }`}
+                    >
+                      {positive ? (
+                        <TrendingUp size={12} />
+                      ) : negative ? (
+                        <TrendingDown size={12} />
+                      ) : null}
+                      {c.delta >= 0 ? '+' : ''}
+                      {c.delta.toFixed(2)} avg
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-glow-600 mt-0.5">
+                    {c.onMean.toFixed(2)}/5 on this product
+                    {' · '}
+                    {c.offMean.toFixed(2)}/5 off it
+                    {' · '}
+                    {c.nOn} vs {c.nOff} days
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className="card">
+        <h3 className="font-display text-lg text-glow-800 mb-2 flex items-center gap-1.5">
+          <BookOpen size={16} className="text-glow-700" /> Research-backed coverage
+        </h3>
+        <p className="text-xs text-glow-600 mb-3">
+          For each concern, the active-routine ingredients with the strongest research behind
+          them, and recommended additions when a concern lacks high-evidence coverage.
+        </p>
+        <ul className="space-y-3">
+          {CONCERNS.map((c) => {
+            const entry = evidenceByConcern.get(c.id)!;
+            const haveHigh = entry.userIngredients.some((u) => u.evidence === 'high');
+            return (
+              <li key={c.id}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-sm text-glow-900">{c.label}</span>
+                  {entry.userIngredients.length === 0 ? (
+                    <span className="text-[11px] text-glow-500">no evidence-backed match</span>
+                  ) : haveHigh ? (
+                    <span className="text-[11px] text-emerald-700 font-semibold">covered</span>
+                  ) : (
+                    <span className="text-[11px] text-amber-700">moderate-only</span>
+                  )}
+                </div>
+                {entry.userIngredients.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {entry.userIngredients.map((u) => (
+                      <span
+                        key={u.name}
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${evidenceChipClass(u.evidence)}`}
+                        title={`${u.evidence} evidence`}
+                      >
+                        {u.name}
+                        <span className="opacity-70">·{u.evidence === 'high' ? 'H' : u.evidence === 'moderate' ? 'M' : 'L'}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {!haveHigh && entry.recommendations.length > 0 && (
+                  <div className="mt-1 text-[11px] text-glow-600">
+                    Try:{' '}
+                    {entry.recommendations.map((r, i) => (
+                      <span key={r.name}>
+                        {i > 0 ? ', ' : ''}
+                        <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ${evidenceChipClass(r.evidence)}`}>
+                          {r.name}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        <p className="text-[10px] text-glow-500 mt-3">
+          Evidence: <span className={`${evidenceChipClass('high')} px-1.5 py-0.5 rounded-full`}>H high</span>{' '}
+          <span className={`${evidenceChipClass('moderate')} px-1.5 py-0.5 rounded-full`}>M moderate</span>{' '}
+          <span className={`${evidenceChipClass('limited')} px-1.5 py-0.5 rounded-full`}>L limited</span>{' '}
+          based on published clinical literature.
+        </p>
       </section>
 
       <section className="card">
@@ -403,6 +602,19 @@ function AskAiBox({
       )}
     </section>
   );
+}
+
+function evidenceWeight(e?: Evidence): number {
+  if (e === 'high') return 3;
+  if (e === 'moderate') return 2;
+  if (e === 'limited') return 1;
+  return 0;
+}
+
+function evidenceChipClass(e: Evidence): string {
+  if (e === 'high') return 'bg-emerald-100 text-emerald-800';
+  if (e === 'moderate') return 'bg-amber-100 text-amber-800';
+  return 'bg-glow-100 text-glow-800';
 }
 
 function computeStreak(photos: { date: string }[]): number {

@@ -43,6 +43,7 @@ export default function Compare() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key]);
   const [viewing, setViewing] = useState<PhotoEntry | null>(null);
+  const [pickerRole, setPickerRole] = useState<'before' | 'after' | null>(null);
   const [caption, setCaption] = useState('');
   const [referenceKey, setReferenceKey] = useState<string>('date');
   const [sliderState, setSliderState] = useState<CompareSliderState>(DEFAULT_COMPARE_STATE);
@@ -290,44 +291,193 @@ export default function Compare() {
       )}
 
       <section className="card">
-        <h3 className="font-display text-lg text-glow-800 mb-3">All photos in this zone</h3>
+        <h3 className="font-display text-lg text-glow-800 mb-2">Pick photos</h3>
         {sorted.length === 0 ? (
           <p className="text-sm text-glow-600/80">No photos for this zone yet.</p>
         ) : (
-          <div className="grid grid-cols-3 gap-2">
-            {sorted.map((p) => (
-              <SelectablePhoto
-                key={p.id}
-                photo={p}
-                isBefore={(before?.id ?? -1) === p.id}
-                isAfter={(after?.id ?? -1) === p.id}
-                onPickAs={(role) => {
-                  if (role === 'before') {
-                    if ((before?.id ?? -1) === p.id) setBeforeId(undefined);
-                    else {
-                      if ((after?.id ?? -1) === p.id) setAfterId(undefined);
-                      setBeforeId(p.id);
-                    }
-                  } else {
-                    if ((after?.id ?? -1) === p.id) setAfterId(undefined);
-                    else {
-                      if ((before?.id ?? -1) === p.id) setBeforeId(undefined);
-                      setAfterId(p.id);
-                    }
-                  }
-                  setSliderState(DEFAULT_COMPARE_STATE);
-                }}
-                onView={() => setViewing(p)}
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <PickerTile
+                role="before"
+                photo={before}
+                onOpen={() => setPickerRole('before')}
+                onClear={() => setBeforeId(undefined)}
               />
-            ))}
-          </div>
+              <PickerTile
+                role="after"
+                photo={after}
+                onOpen={() => setPickerRole('after')}
+                onClear={() => setAfterId(undefined)}
+              />
+            </div>
+            <p className="text-[11px] text-glow-500 mt-2">
+              Tap a tile to pick its photo. Older dates are usually Before, newer dates After.
+            </p>
+          </>
         )}
-        <p className="text-[11px] text-glow-500 mt-2">
-          Tap <span className="font-semibold">B</span> or <span className="font-semibold">A</span> on any photo to set it as Before or After. Tap the corner icon to open it (also lets you change its date or zone).
-        </p>
       </section>
 
+      {pickerRole && (
+        <PhotoPickerModal
+          role={pickerRole}
+          photos={sorted}
+          currentBeforeId={before?.id}
+          currentAfterId={after?.id}
+          onPick={(p) => {
+            if (pickerRole === 'before') {
+              if ((after?.id ?? -1) === p.id) setAfterId(undefined);
+              setBeforeId(p.id);
+            } else {
+              if ((before?.id ?? -1) === p.id) setBeforeId(undefined);
+              setAfterId(p.id);
+            }
+            setSliderState(DEFAULT_COMPARE_STATE);
+            setPickerRole(null);
+          }}
+          onClose={() => setPickerRole(null)}
+          onView={(p) => {
+            setViewing(p);
+            setPickerRole(null);
+          }}
+        />
+      )}
+
       {viewing && <PhotoViewer photo={viewing} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}
+
+function PickerTile({
+  role,
+  photo,
+  onOpen,
+  onClear,
+}: {
+  role: 'before' | 'after';
+  photo: PhotoEntry | undefined;
+  onOpen: () => void;
+  onClear: () => void;
+}) {
+  const label = role === 'before' ? 'Before' : 'After';
+  return (
+    <div className="rounded-2xl border border-glow-200 overflow-hidden">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="block w-full aspect-square bg-glow-50 relative focus:outline-none focus:ring-2 focus:ring-glow-500"
+        aria-label={`Choose ${label} photo`}
+      >
+        {photo ? (
+          <PhotoThumb blob={photo.thumb} className="w-full h-full object-cover" />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-glow-600">
+            Tap to choose
+          </div>
+        )}
+        <span className="absolute top-2 left-2 chip bg-white/90 text-glow-800 text-[10px] font-semibold uppercase tracking-wide">
+          {label}
+        </span>
+      </button>
+      <div className="px-3 py-2 flex items-baseline justify-between gap-2 bg-white/60">
+        <div className="text-xs text-glow-800 truncate">
+          {photo ? fmtDate(photo.date) : <span className="text-glow-500">No photo</span>}
+        </div>
+        {photo && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="text-[11px] text-glow-600 hover:text-red-700 hover:underline"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PhotoPickerModal({
+  role,
+  photos,
+  currentBeforeId,
+  currentAfterId,
+  onPick,
+  onClose,
+  onView,
+}: {
+  role: 'before' | 'after';
+  photos: PhotoEntry[];
+  currentBeforeId?: number;
+  currentAfterId?: number;
+  onPick: (p: PhotoEntry) => void;
+  onClose: () => void;
+  onView: (p: PhotoEntry) => void;
+}) {
+  const label = role === 'before' ? 'Before' : 'After';
+  // Show oldest-first when picking Before, newest-first when picking After.
+  const ordered = role === 'before' ? photos : [...photos].reverse();
+  return (
+    <div className="fixed inset-0 z-40 flex flex-col bg-black/60">
+      <div className="bg-white shadow-md mt-auto sm:my-auto sm:mx-auto sm:max-w-lg sm:rounded-2xl rounded-t-2xl flex flex-col max-h-[85vh] sm:max-h-[80vh] overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-glow-100">
+          <h3 className="font-display text-lg text-glow-800">Choose {label} photo</h3>
+          <button
+            type="button"
+            className="btn-ghost p-2"
+            onClick={onClose}
+            aria-label="Close picker"
+          >
+            <Maximize2 size={16} className="rotate-45" />
+          </button>
+        </div>
+        <div className="overflow-y-auto p-3 grid grid-cols-3 gap-2">
+          {ordered.map((p) => {
+            const isB = currentBeforeId === p.id;
+            const isA = currentAfterId === p.id;
+            const taken = isB || isA;
+            const role2 = isB ? 'B' : isA ? 'A' : null;
+            return (
+              <div
+                key={p.id}
+                className="relative rounded-xl overflow-hidden border-2 border-transparent"
+              >
+                <button
+                  type="button"
+                  className="absolute inset-0 block focus:outline-none focus:ring-2 focus:ring-glow-500"
+                  onClick={() => onPick(p)}
+                  aria-label={`Use as ${label}: ${p.date}`}
+                >
+                  <PhotoThumb blob={p.thumb} className="w-full h-full object-cover aspect-square" />
+                </button>
+                <span className="absolute bottom-1 left-1 chip bg-white/90 text-[10px] font-medium pointer-events-none">
+                  {fmtDate(p.date)}
+                </span>
+                {role2 && (
+                  <span className="absolute top-1 left-1 chip bg-glow-600 text-white text-[10px] pointer-events-none">
+                    {role2}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="absolute top-1 right-1 bg-white/90 hover:bg-white rounded-full p-1 shadow-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onView(p);
+                  }}
+                  aria-label="Open photo details"
+                >
+                  <Maximize2 size={12} className="text-glow-800" />
+                </button>
+                {taken && role2 !== (role === 'before' ? 'B' : 'A') && (
+                  <span className="absolute inset-x-0 bottom-0 bg-glow-600/80 text-white text-[10px] text-center py-0.5 pointer-events-none">
+                    will swap roles
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -356,61 +506,3 @@ function stripPrefix(s: string): string {
   return s.replace(/^Before · |^After · /, '');
 }
 
-function SelectablePhoto({
-  photo,
-  isBefore,
-  isAfter,
-  onPickAs,
-  onView,
-}: {
-  photo: PhotoEntry;
-  isBefore: boolean;
-  isAfter: boolean;
-  onPickAs: (role: 'before' | 'after') => void;
-  onView: () => void;
-}) {
-  return (
-    <div
-      className={`relative aspect-square rounded-xl overflow-hidden border-2 transition ${
-        isBefore || isAfter ? 'border-glow-600' : 'border-transparent'
-      }`}
-    >
-      <PhotoThumb blob={photo.thumb} className="w-full h-full object-cover" alt={photo.date} />
-      <span className="absolute bottom-1 left-1 chip bg-white/90 text-[10px] pointer-events-none">
-        {fmtDate(photo.date)}
-      </span>
-      <div className="absolute top-1 left-1 flex gap-1">
-        <button
-          type="button"
-          onClick={() => onPickAs('before')}
-          aria-pressed={isBefore}
-          aria-label={isBefore ? 'Unset Before' : 'Set as Before'}
-          className={`h-6 min-w-[24px] rounded-full text-[11px] font-bold flex items-center justify-center shadow-sm ${
-            isBefore ? 'bg-glow-600 text-white' : 'bg-white/90 text-glow-700 hover:bg-white'
-          }`}
-        >
-          B
-        </button>
-        <button
-          type="button"
-          onClick={() => onPickAs('after')}
-          aria-pressed={isAfter}
-          aria-label={isAfter ? 'Unset After' : 'Set as After'}
-          className={`h-6 min-w-[24px] rounded-full text-[11px] font-bold flex items-center justify-center shadow-sm ${
-            isAfter ? 'bg-glow-700 text-white' : 'bg-white/90 text-glow-700 hover:bg-white'
-          }`}
-        >
-          A
-        </button>
-      </div>
-      <button
-        type="button"
-        onClick={onView}
-        aria-label="Open photo"
-        className="absolute top-1 right-1 bg-white/90 hover:bg-white rounded-full p-1 shadow-sm"
-      >
-        <Maximize2 size={12} className="text-glow-800" />
-      </button>
-    </div>
-  );
-}
