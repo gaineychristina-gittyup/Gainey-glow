@@ -6,6 +6,7 @@ import {
   CONCERNS,
   PRODUCT_CATEGORIES,
   PRODUCT_STEPS,
+  WEEKDAYS,
   db,
   type Concern,
   type Product,
@@ -271,6 +272,71 @@ export default function Products() {
             setScanResults(null);
           }}
         />
+      )}
+    </div>
+  );
+}
+
+function DaySelector({
+  periodLabel,
+  days,
+  onChange,
+}: {
+  periodLabel: string;
+  days: number[];
+  onChange: (next: number[]) => void;
+}) {
+  const isEveryDay = days.length === 0;
+  function toggle(d: number) {
+    if (days.includes(d)) onChange(days.filter((x) => x !== d));
+    else onChange([...days, d].sort());
+  }
+  return (
+    <div className="mt-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-glow-700">
+          {periodLabel} days
+        </span>
+        <span className="text-[11px] text-glow-500">
+          {isEveryDay ? 'every day' : days.length === 7 ? 'every day' : `${days.length} day${days.length === 1 ? '' : 's'}`}
+        </span>
+      </div>
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {WEEKDAYS.map((w) => {
+          const active = isEveryDay || days.includes(w.id);
+          return (
+            <button
+              key={w.id}
+              type="button"
+              onClick={() => {
+                // First click while empty (every-day) → switch to a single-day pick.
+                if (isEveryDay) {
+                  onChange([w.id]);
+                  return;
+                }
+                toggle(w.id);
+              }}
+              className={`aspect-square rounded-full text-[11px] font-medium border ${
+                active
+                  ? 'bg-glow-600 text-white border-glow-600'
+                  : 'bg-white text-glow-700 border-glow-200 hover:bg-glow-50'
+              }`}
+              aria-label={`${periodLabel} on ${w.label}`}
+              aria-pressed={active}
+            >
+              {w.short}
+            </button>
+          );
+        })}
+      </div>
+      {!isEveryDay && (
+        <button
+          type="button"
+          className="mt-1 text-[11px] text-glow-600 hover:underline"
+          onClick={() => onChange([])}
+        >
+          Reset to every day
+        </button>
       )}
     </div>
   );
@@ -730,6 +796,21 @@ function ProductEditor({
               );
             })}
           </div>
+          {(['am', 'pm'] as const).map((t) =>
+            draft.timeOfDay.includes(t) ? (
+              <DaySelector
+                key={t}
+                periodLabel={t.toUpperCase()}
+                days={draft.schedule?.[t] ?? []}
+                onChange={(next) =>
+                  update('schedule', {
+                    ...(draft.schedule ?? {}),
+                    [t]: next.length === 0 ? undefined : next,
+                  })
+                }
+              />
+            ) : null,
+          )}
         </div>
 
         <div>
