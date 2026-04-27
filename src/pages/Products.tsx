@@ -820,8 +820,26 @@ function ProductEditor({
     setIngredientInput('');
   };
 
+  const canSave = draft.name.trim().length > 0;
+  const save = () => {
+    if (canSave) onSave(draft);
+  };
+
   return (
-    <Modal onClose={onClose} title={initial.id ? 'Edit product' : 'Add product'}>
+    <Modal
+      onClose={onClose}
+      title={initial.id ? 'Edit product' : 'Add product'}
+      headerAction={
+        <button
+          type="button"
+          className="btn-primary !px-3 !py-1.5 text-xs"
+          onClick={save}
+          disabled={!canSave}
+        >
+          Save
+        </button>
+      }
+    >
       <div className="space-y-3">
         <div>
           <label className="label">Name</label>
@@ -832,8 +850,9 @@ function ProductEditor({
             placeholder="e.g. Glow Recipe Strawberry BHA Toner"
           />
         </div>
+
         <div className="grid grid-cols-2 gap-3">
-          <div>
+          <div className="min-w-0">
             <label className="label">Brand</label>
             <input
               className="input"
@@ -841,7 +860,7 @@ function ProductEditor({
               onChange={(e) => update('brand', e.target.value)}
             />
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="label">Category</label>
             <select
               className="input"
@@ -869,14 +888,14 @@ function ProductEditor({
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <div className="flex items-center justify-between">
-              <label className="label">Started (optional)</label>
+          <div className="min-w-0">
+            <div className="flex items-baseline justify-between gap-1">
+              <label className="label !mb-0">Started</label>
               {draft.startedOn ? (
                 <button
                   type="button"
                   onClick={() => update('startedOn', undefined)}
-                  className="text-[11px] text-glow-600 hover:underline"
+                  className="text-[10px] text-glow-600 hover:underline"
                 >
                   Clear
                 </button>
@@ -884,38 +903,44 @@ function ProductEditor({
             </div>
             <input
               type="date"
-              className="input"
+              className="input mt-1"
               value={draft.startedOn ?? ''}
               onChange={(e) => update('startedOn', e.target.value || undefined)}
             />
           </div>
-          <div>
-            <label className="label">Stopped (optional)</label>
+          <div className="min-w-0">
+            <div className="flex items-baseline justify-between gap-1">
+              <label className="label !mb-0">Stopped</label>
+              {draft.stoppedOn ? (
+                <button
+                  type="button"
+                  onClick={() => update('stoppedOn', undefined)}
+                  className="text-[10px] text-glow-600 hover:underline"
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
             <input
               type="date"
-              className="input"
+              className="input mt-1"
               value={draft.stoppedOn ?? ''}
               onChange={(e) => update('stoppedOn', e.target.value || undefined)}
             />
           </div>
         </div>
 
-        <div>
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-glow-600"
-              checked={!!draft.inRotation}
-              onChange={(e) => update('inRotation', e.target.checked)}
-            />
-            <span className="text-xs font-semibold uppercase tracking-wide text-glow-700">
-              In current rotation
-            </span>
-          </label>
-          <p className="text-[11px] text-glow-500 mt-1">
-            Off-rotation products drop to the bottom of the Products list.
-          </p>
-        </div>
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-glow-600"
+            checked={!!draft.inRotation}
+            onChange={(e) => update('inRotation', e.target.checked)}
+          />
+          <span className="text-xs font-semibold uppercase tracking-wide text-glow-700">
+            In current rotation
+          </span>
+        </label>
 
         <div>
           <label className="label">Time of day</label>
@@ -970,7 +995,7 @@ function ProductEditor({
           <label className="label">Key ingredients</label>
           <div className="flex gap-2">
             <input
-              className="input flex-1"
+              className="input flex-1 min-w-0"
               placeholder="e.g. niacinamide, retinol"
               value={ingredientInput}
               onChange={(e) => setIngredientInput(e.target.value)}
@@ -981,7 +1006,7 @@ function ProductEditor({
                 }
               }}
             />
-            <button type="button" className="btn-soft" onClick={addIngredient}>Add</button>
+            <button type="button" className="btn-soft shrink-0" onClick={addIngredient}>Add</button>
           </div>
           {draft.ingredients.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1044,8 +1069,8 @@ function ProductEditor({
         <div>
           <label className="label">Comments</label>
           <textarea
-            className="input min-h-[60px]"
-            placeholder="Your review of this product — texture, smell, results, irritation, repurchase?"
+            className="input min-h-[56px] resize-none"
+            placeholder="Your review — texture, smell, results, repurchase?"
             value={draft.comments ?? ''}
             onChange={(e) => update('comments', e.target.value)}
           />
@@ -1054,16 +1079,16 @@ function ProductEditor({
         <div>
           <label className="label">Notes</label>
           <textarea
-            className="input min-h-[60px]"
-            placeholder="Any private notes (e.g. limit to PM, mix with HA serum, etc.)"
+            className="input min-h-[56px] resize-none"
+            placeholder="Private notes (e.g. PM only, mix with HA serum)"
             value={draft.notes ?? ''}
             onChange={(e) => update('notes', e.target.value)}
           />
         </div>
 
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex justify-end gap-2 pt-1">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn-primary" onClick={() => onSave(draft)}>Save</button>
+          <button type="button" className="btn-primary" onClick={save} disabled={!canSave}>Save</button>
         </div>
       </div>
     </Modal>
@@ -1154,21 +1179,26 @@ function Modal({
   title,
   onClose,
   children,
+  headerAction,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  headerAction?: React.ReactNode;
 }) {
   return (
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/40 p-3">
-      <div className="card w-full max-w-md max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-display text-lg text-glow-800">{title}</h3>
-          <button className="btn-ghost p-2" onClick={onClose} aria-label="Close">
-            <X size={16} />
-          </button>
+      <div className="card w-full max-w-md max-h-[90vh] overflow-y-auto overflow-x-hidden !p-0">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-white/95 backdrop-blur border-b border-glow-100 px-4 py-2.5">
+          <h3 className="font-display text-lg text-glow-800 truncate">{title}</h3>
+          <div className="flex items-center gap-1 shrink-0">
+            {headerAction}
+            <button className="btn-ghost p-2" onClick={onClose} aria-label="Close">
+              <X size={16} />
+            </button>
+          </div>
         </div>
-        {children}
+        <div className="px-4 py-4">{children}</div>
       </div>
     </div>
   );
