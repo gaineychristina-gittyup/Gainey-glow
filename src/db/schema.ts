@@ -98,6 +98,10 @@ export interface Product {
   rating?: number;                // 1–5; user's overall rating of the product
   comments?: string;              // free-form review/comments
   sortOrder?: number;             // explicit display order (lower = earlier)
+  // Whether this product is part of the user's current rotation. Products
+  // without it set are treated as not in rotation and sorted to the bottom
+  // of the Products list.
+  inRotation?: boolean;
   // Optional weekly schedule per period. 0=Sun..6=Sat. Empty (or absent)
   // arrays = use the period's default (every day the period is active).
   schedule?: { am?: number[]; pm?: number[] };

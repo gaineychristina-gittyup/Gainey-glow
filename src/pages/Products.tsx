@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useLocation } from 'react-router-dom';
-import { AlertTriangle, ChevronRight, GripVertical, Loader2, Pencil, Plus, ScanLine, Star, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Bookmark, BookmarkCheck, ChevronRight, GripVertical, Loader2, Pencil, Plus, ScanLine, Star, Trash2, X } from 'lucide-react';
 import {
   DndContext,
   PointerSensor,
@@ -49,6 +49,7 @@ const blank: Product = {
   startedOn: todayISO(),
   timeOfDay: ['am', 'pm'],
   notes: '',
+  inRotation: true,
 };
 
 export default function Products() {
@@ -82,6 +83,11 @@ export default function Products() {
     next.splice(toIndex, 0, moved);
     const updates = next.map((p, i) => ({ ...p, sortOrder: i }));
     await db.products.bulkPut(updates);
+  }
+
+  async function toggleRotation(p: Product) {
+    if (p.id == null) return;
+    await db.products.update(p.id, { inRotation: !p.inRotation });
   }
 
   // If we navigated here with state.editProductId, open that product's editor
@@ -208,6 +214,8 @@ export default function Products() {
             (p) => (p.category ?? 'topical') === cat.id,
           );
           if (inCategory.length === 0) return null;
+          const rotation = inCategory.filter((p) => p.inRotation);
+          const backlog = inCategory.filter((p) => !p.inRotation);
           return (
             <div key={cat.id} className="space-y-2">
               <div className="px-1 text-[11px] font-semibold uppercase tracking-wide text-glow-700">
@@ -217,13 +225,37 @@ export default function Products() {
                   · {inCategory.length}
                 </span>
               </div>
-              <SortableProductList
-                items={inCategory}
-                sensitiveSet={userSensitiveSet}
-                onEdit={(p) => setEditing(p)}
-                onDelete={(p) => db.products.delete(p.id!)}
-                onReorder={(from, to) => reorderInCategory(inCategory, from, to)}
-              />
+
+              {rotation.length > 0 && (
+                <SortableProductList
+                  items={rotation}
+                  sensitiveSet={userSensitiveSet}
+                  onEdit={(p) => setEditing(p)}
+                  onDelete={(p) => db.products.delete(p.id!)}
+                  onToggleRotation={toggleRotation}
+                  onReorder={(from, to) => reorderInCategory(rotation, from, to)}
+                />
+              )}
+
+              {backlog.length > 0 && (
+                <>
+                  <div className="px-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-glow-500">
+                    Not in current rotation
+                    <span className="text-glow-400 font-normal">
+                      {' '}
+                      · {backlog.length}
+                    </span>
+                  </div>
+                  <SortableProductList
+                    items={backlog}
+                    sensitiveSet={userSensitiveSet}
+                    onEdit={(p) => setEditing(p)}
+                    onDelete={(p) => db.products.delete(p.id!)}
+                    onToggleRotation={toggleRotation}
+                    onReorder={(from, to) => reorderInCategory(backlog, from, to)}
+                  />
+                </>
+              )}
             </div>
           );
         })
@@ -274,6 +306,7 @@ export default function Products() {
                 startedOn: todayISO(),
                 timeOfDay: ['am', 'pm'],
                 notes: r.notes,
+                inRotation: true,
               });
             }
             setScanResults(null);
@@ -480,12 +513,14 @@ function SortableProductList({
   sensitiveSet,
   onEdit,
   onDelete,
+  onToggleRotation,
   onReorder,
 }: {
   items: Product[];
   sensitiveSet: Set<string>;
   onEdit: (p: Product) => void;
   onDelete: (p: Product) => void;
+  onToggleRotation: (p: Product) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
 }) {
   const sensors = useSensors(
@@ -516,6 +551,7 @@ function SortableProductList({
               sensitiveSet={sensitiveSet}
               onEdit={() => onEdit(p)}
               onDelete={() => onDelete(p)}
+              onToggleRotation={() => onToggleRotation(p)}
             />
           ))}
         </div>
@@ -529,11 +565,13 @@ function ProductCard({
   sensitiveSet,
   onEdit,
   onDelete,
+  onToggleRotation,
 }: {
   product: Product;
   sensitiveSet: Set<string>;
   onEdit: () => void;
   onDelete: () => void;
+  onToggleRotation: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: product.id!,
@@ -624,6 +662,29 @@ function ProductCard({
           </div>
         </button>
         <div className="flex gap-0.5 shrink-0">
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleRotation();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                onToggleRotation();
+              }
+            }}
+            className={`btn-ghost p-2 cursor-pointer ${
+              product.inRotation ? 'text-glow-700' : 'text-glow-400'
+            }`}
+            aria-label={product.inRotation ? 'Remove from current rotation' : 'Add to current rotation'}
+            aria-pressed={!!product.inRotation}
+            title={product.inRotation ? 'In current rotation' : 'Not in current rotation'}
+          >
+            {product.inRotation ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}
+          </span>
           <span
             role="button"
             tabIndex={0}
@@ -815,6 +876,23 @@ function ProductEditor({
               onChange={(e) => update('stoppedOn', e.target.value || undefined)}
             />
           </div>
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-glow-600"
+              checked={!!draft.inRotation}
+              onChange={(e) => update('inRotation', e.target.checked)}
+            />
+            <span className="text-xs font-semibold uppercase tracking-wide text-glow-700">
+              In current rotation
+            </span>
+          </label>
+          <p className="text-[11px] text-glow-500 mt-1">
+            Off-rotation products drop to the bottom of the Products list.
+          </p>
         </div>
 
         <div>
