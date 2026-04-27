@@ -66,6 +66,7 @@ export default function Timeline() {
 
   const [viewingComparison, setViewingComparison] = useState<Comparison | null>(null);
   const [picked, setPicked] = useState<PhotoEntry[]>([]);
+  const [pickMode, setPickMode] = useState(false);
   const [view, setView] = useState<'list' | 'calendar'>('list');
   const [calendarMonths, setCalendarMonths] = useState<3 | 6>(3);
   const [openDate, setOpenDate] = useState<string | null>(null);
@@ -99,6 +100,8 @@ export default function Timeline() {
         afterId: orderedPicks.after.id,
       },
     });
+    setPicked([]);
+    setPickMode(false);
   }
 
   const photos = useLiveQuery(() => db.photos.toArray(), []);
@@ -259,6 +262,17 @@ export default function Timeline() {
               {compact ? 'Expanded' : 'Compact'}
             </button>
           )}
+          <button
+            onClick={() => setPickMode((m) => !m)}
+            className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+              pickMode
+                ? 'bg-glow-600 text-white border-glow-600'
+                : 'bg-white/70 text-glow-700 border-glow-200 hover:bg-glow-50'
+            }`}
+            title="Tap photos to pick a Before and After to compare"
+          >
+            {pickMode ? 'Picking…' : 'Pick to compare'}
+          </button>
           {view === 'calendar' && (
             <div className="inline-flex rounded-full border border-glow-200 overflow-hidden">
               {([3, 6] as const).map((m) => (
@@ -374,7 +388,7 @@ export default function Timeline() {
                       <TimelineCard
                         event={e}
                         compact={compact}
-                        onPhoto={setViewing}
+                        onPhoto={pickMode ? togglePick : setViewing}
                         onEditTreatment={setEditingTreatment}
                         onOpenComparison={setViewingComparison}
                         onPickPhoto={togglePick}

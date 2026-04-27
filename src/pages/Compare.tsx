@@ -169,6 +169,35 @@ export default function Compare() {
           {ZONES.find((z) => z.id === zone)?.label} — {sorted.length} photo
           {sorted.length === 1 ? '' : 's'}.
         </p>
+
+        {sorted.length >= 2 && (
+          <div className="flex gap-2 flex-wrap mt-3">
+            <button
+              type="button"
+              className="btn-soft text-xs"
+              onClick={() => {
+                const newest = sorted[sorted.length - 1];
+                const prior = sorted[sorted.length - 2];
+                setBeforeId(prior.id);
+                setAfterId(newest.id);
+                setSliderState(DEFAULT_COMPARE_STATE);
+              }}
+            >
+              Latest two
+            </button>
+            <button
+              type="button"
+              className="btn-soft text-xs"
+              onClick={() => {
+                setBeforeId(sorted[0].id);
+                setAfterId(sorted[sorted.length - 1].id);
+                setSliderState(DEFAULT_COMPARE_STATE);
+              }}
+            >
+              First &amp; latest
+            </button>
+          </div>
+        )}
       </section>
 
       {before && after && before.id !== after.id ? (
@@ -440,7 +469,7 @@ function PhotoPickerModal({
             return (
               <div
                 key={p.id}
-                className="relative rounded-xl overflow-hidden border-2 border-transparent"
+                className="relative aspect-square rounded-xl overflow-hidden border-2 border-transparent"
               >
                 <button
                   type="button"
@@ -448,7 +477,7 @@ function PhotoPickerModal({
                   onClick={() => onPick(p)}
                   aria-label={`Use as ${label}: ${p.date}`}
                 >
-                  <PhotoThumb blob={p.thumb} className="w-full h-full object-cover aspect-square" />
+                  <PhotoThumb blob={p.thumb} className="w-full h-full object-cover" />
                 </button>
                 <span className="absolute bottom-1 left-1 chip bg-white/90 text-[10px] font-medium pointer-events-none">
                   {fmtDate(p.date)}
