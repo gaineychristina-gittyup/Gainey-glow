@@ -255,6 +255,14 @@ export interface SkinRating {
   notes?: string;
 }
 
+export interface Insight {
+  id?: number;
+  date: string;       // ISO date — when the observation applies
+  createdAt: number;  // epoch ms — when the user wrote it
+  title?: string;
+  text: string;
+}
+
 class GaineyGlowDB extends Dexie {
   photos!: Table<PhotoEntry, number>;
   products!: Table<Product, number>;
@@ -265,6 +273,7 @@ class GaineyGlowDB extends Dexie {
   checkins!: Table<Checkin, number>;
   comparisons!: Table<Comparison, number>;
   skinRatings!: Table<SkinRating, number>;
+  insights!: Table<Insight, number>;
 
   constructor() {
     super('gainey-glow');
@@ -286,6 +295,9 @@ class GaineyGlowDB extends Dexie {
     });
     this.version(5).stores({
       skinRatings: '++id, &date',
+    });
+    this.version(6).stores({
+      insights: '++id, date, createdAt',
     });
   }
 }
