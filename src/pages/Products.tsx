@@ -279,6 +279,11 @@ export default function Products() {
               notes: next.notes?.trim() || undefined,
               comments: next.comments?.trim() || undefined,
             };
+            // Drop undefined optional fields so Dexie removes them from the
+            // stored row (and its indexes) instead of persisting `undefined`.
+            (['startedOn', 'stoppedOn', 'brand', 'notes', 'comments', 'rating', 'category', 'sortOrder', 'schedule'] as const).forEach((k) => {
+              if (cleaned[k] === undefined) delete cleaned[k];
+            });
             if (!cleaned.name) return;
             if (cleaned.id) {
               await db.products.put(cleaned);
