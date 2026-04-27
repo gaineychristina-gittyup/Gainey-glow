@@ -9,6 +9,7 @@ import {
   CircleStop,
   FlaskConical,
   Images,
+  Lightbulb,
   Plus,
   Sparkles,
   Trash2,
@@ -19,6 +20,7 @@ import {
   TREATMENT_TYPES,
   PRODUCT_STEPS,
   type Comparison,
+  type Insight,
   type PhotoEntry,
   type Treatment,
 } from '../db/schema';
@@ -29,6 +31,7 @@ import { getGeminiKey } from '../lib/settings';
 import PhotoThumb from '../components/PhotoThumb';
 import PhotoViewer from '../components/PhotoViewer';
 import { TreatmentEditor, AftercareList } from '../components/TreatmentEditor';
+import { InsightEditor } from '../components/InsightEditor';
 
 interface SinceTreatment {
   days: number;
@@ -40,11 +43,13 @@ type Event =
   | { kind: 'product-start'; date: string; sortKey: number; productId?: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
   | { kind: 'product-stop'; date: string; sortKey: number; productId?: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
   | { kind: 'treatment'; date: string; sortKey: number; treatment: Treatment }
-  | { kind: 'comparison'; date: string; sortKey: number; comparison: Comparison; sinceTreatment?: SinceTreatment };
+  | { kind: 'comparison'; date: string; sortKey: number; comparison: Comparison; sinceTreatment?: SinceTreatment }
+  | { kind: 'insight'; date: string; sortKey: number; insight: Insight; sinceTreatment?: SinceTreatment };
 
-type Filter = 'all' | 'photos' | 'products' | 'treatments' | 'comparisons';
+type Filter = 'all' | 'photos' | 'products' | 'treatments' | 'comparisons' | 'insights';
 
 const NEW_TREATMENT: Treatment = { type: 'facial', date: todayISO() };
+const newInsight = (): Insight => ({ date: todayISO(), createdAt: Date.now(), text: '' });
 
 // Per-type colors for badges and timeline dots.
 const TYPE_STYLE: Record<
@@ -56,11 +61,13 @@ const TYPE_STYLE: Record<
   'product-stop': { dot: 'bg-amber-500', chip: 'bg-amber-100', chipText: 'text-amber-800' },
   treatment: { dot: 'bg-violet-500', chip: 'bg-violet-100', chipText: 'text-violet-800' },
   comparison: { dot: 'bg-rose-500', chip: 'bg-rose-100', chipText: 'text-rose-800' },
+  insight: { dot: 'bg-teal-500', chip: 'bg-teal-100', chipText: 'text-teal-800' },
 };
 
 export default function Timeline() {
   const [viewing, setViewing] = useState<PhotoEntry | null>(null);
   const [editingTreatment, setEditingTreatment] = useState<Treatment | null>(null);
+  const [editingInsight, setEditingInsight] = useState<Insight | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [compact, setCompact] = useState(false);
 
@@ -108,6 +115,7 @@ export default function Timeline() {
   const products = useLiveQuery(() => db.products.toArray(), []);
   const treatments = useLiveQuery(() => db.treatments.toArray(), []);
   const comparisons = useLiveQuery(() => db.comparisons.toArray(), []);
+  const insights = useLiveQuery(() => db.insights.toArray(), []);
   const events: Event[] = useMemo(() => {
     const out: Event[] = [];
 
@@ -183,8 +191,20 @@ export default function Timeline() {
       });
     });
 
+    (insights ?? []).forEach((i) => {
+      out.push({
+        kind: 'insight',
+        date: i.date,
+        // Sort insights between treatments and product events on the same day,
+        // and break ties by createdAt so newer insights appear above older ones.
+        sortKey: dateKey(i.date) - 0.15 + i.createdAt / 1e16,
+        insight: i,
+        sinceTreatment: lastTreatmentBefore(i.date),
+      });
+    });
+
     return out.sort((a, b) => b.sortKey - a.sortKey);
-  }, [photos, products, treatments, comparisons]);
+  }, [photos, products, treatments, comparisons, insights]);
 
   const filtered = useMemo(() => {
     return events.filter((e) => {
@@ -193,6 +213,7 @@ export default function Timeline() {
       if (filter === 'treatments') return e.kind === 'treatment';
       if (filter === 'products') return e.kind === 'product-start' || e.kind === 'product-stop';
       if (filter === 'comparisons') return e.kind === 'comparison';
+      if (filter === 'insights') return e.kind === 'insight';
       return true;
     });
   }, [events, filter]);
@@ -221,6 +242,7 @@ export default function Timeline() {
     { id: 'products', label: 'Products' },
     { id: 'treatments', label: 'Treatments' },
     { id: 'comparisons', label: 'Compares' },
+    { id: 'insights', label: 'Insights' },
   ];
 
   return (
@@ -228,12 +250,20 @@ export default function Timeline() {
       <section className="card">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h2 className="font-display text-xl text-glow-800">Timeline</h2>
-          <button
-            className="btn-primary"
-            onClick={() => setEditingTreatment({ ...NEW_TREATMENT })}
-          >
-            <Plus size={16} /> Treatment
-          </button>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              className="btn-ghost border border-glow-200"
+              onClick={() => setEditingInsight(newInsight())}
+            >
+              <Lightbulb size={16} /> Insight
+            </button>
+            <button
+              className="btn-primary"
+              onClick={() => setEditingTreatment({ ...NEW_TREATMENT })}
+            >
+              <Plus size={16} /> Treatment
+            </button>
+          </div>
         </div>
         <div className="mt-3 flex items-center gap-1.5 flex-wrap">
           <div className="inline-flex rounded-full border border-glow-200 overflow-hidden">
@@ -359,6 +389,7 @@ export default function Timeline() {
           onOpenComparison={setViewingComparison}
           onEditTreatment={setEditingTreatment}
           onEditProduct={(pid) => navigate('/products', { state: { editProductId: pid } })}
+          onEditInsight={setEditingInsight}
         />
       ) : filtered.length === 0 ? (
         <div className="card text-sm text-glow-600/80">
@@ -395,6 +426,7 @@ export default function Timeline() {
                         pickedIds={picked.map((x) => x.id!)}
                         onOpenDay={(date) => setOpenDate(date)}
                         onEditProduct={(pid) => navigate('/products', { state: { editProductId: pid } })}
+                        onEditInsight={setEditingInsight}
                       />
                     </li>
                   </Fragment>
@@ -433,6 +465,10 @@ export default function Timeline() {
           onEditProduct={(productId) => {
             setOpenDate(null);
             navigate('/products', { state: { editProductId: productId } });
+          }}
+          onEditInsight={(i) => {
+            setOpenDate(null);
+            setEditingInsight(i);
           }}
         />
       )}
@@ -485,6 +521,27 @@ export default function Timeline() {
           }}
         />
       )}
+
+      {editingInsight && (
+        <InsightEditor
+          initial={editingInsight}
+          onClose={() => setEditingInsight(null)}
+          onSave={async (i) => {
+            const cleaned: Insight = {
+              ...i,
+              text: i.text.trim(),
+              title: i.title?.trim() || undefined,
+            };
+            if (!cleaned.text) {
+              setEditingInsight(null);
+              return;
+            }
+            if (cleaned.id) await db.insights.put(cleaned);
+            else await db.insights.add(cleaned);
+            setEditingInsight(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -499,6 +556,7 @@ function TimelineCard({
   pickedIds,
   onOpenDay,
   onEditProduct,
+  onEditInsight,
 }: {
   event: Event;
   compact: boolean;
@@ -509,6 +567,7 @@ function TimelineCard({
   pickedIds: number[];
   onOpenDay: (date: string) => void;
   onEditProduct: (productId: number) => void;
+  onEditInsight: (i: Insight) => void;
 }) {
   const since = event.kind === 'treatment' ? undefined : event.sinceTreatment;
   return (
@@ -543,6 +602,7 @@ function TimelineCard({
           onPickPhoto={onPickPhoto}
           pickedIds={pickedIds}
           onEditProduct={onEditProduct}
+          onEditInsight={onEditInsight}
         />
       </div>
     </div>
@@ -563,6 +623,8 @@ function Badge({ kind }: { kind: Event['kind'] }) {
       return <span className={cls}><Sparkles size={12} /> Treatment</span>;
     case 'comparison':
       return <span className={cls}><Images size={12} /> Comparison</span>;
+    case 'insight':
+      return <span className={cls}><Lightbulb size={12} /> Insight</span>;
   }
 }
 
@@ -575,6 +637,7 @@ function Body({
   onPickPhoto,
   pickedIds,
   onEditProduct,
+  onEditInsight,
 }: {
   event: Event;
   compact: boolean;
@@ -584,6 +647,7 @@ function Body({
   onPickPhoto: (p: PhotoEntry) => void;
   pickedIds: number[];
   onEditProduct?: (productId: number) => void;
+  onEditInsight?: (i: Insight) => void;
 }) {
   switch (event.kind) {
     case 'photo':
@@ -657,7 +721,58 @@ function Body({
           onOpen={onOpenComparison}
         />
       );
+    case 'insight':
+      return (
+        <InsightBody
+          insight={event.insight}
+          compact={compact}
+          onEdit={onEditInsight}
+        />
+      );
   }
+}
+
+function InsightBody({
+  insight,
+  compact,
+  onEdit,
+}: {
+  insight: Insight;
+  compact: boolean;
+  onEdit?: (i: Insight) => void;
+}) {
+  const title = insight.title?.trim();
+  if (compact) {
+    const summary = title || insight.text.split('\n')[0] || 'Insight';
+    return onEdit ? (
+      <button
+        type="button"
+        className="text-xs text-glow-700 hover:underline text-left line-clamp-1"
+        onClick={() => onEdit(insight)}
+      >
+        {summary}
+      </button>
+    ) : (
+      <div className="text-xs text-glow-700 line-clamp-1">{summary}</div>
+    );
+  }
+  const content = (
+    <>
+      {title && <div className="font-medium text-glow-900">{title}</div>}
+      <div className="text-sm text-glow-800 whitespace-pre-wrap">{insight.text}</div>
+    </>
+  );
+  return onEdit ? (
+    <button
+      type="button"
+      onClick={() => onEdit(insight)}
+      className="block w-full text-left focus:outline-none focus:ring-2 focus:ring-teal-400 rounded-lg"
+    >
+      {content}
+    </button>
+  ) : (
+    <div>{content}</div>
+  );
 }
 
 function ComparisonBody({
@@ -1091,6 +1206,7 @@ function CalendarView({
   onOpenComparison,
   onEditTreatment,
   onEditProduct,
+  onEditInsight,
 }: {
   months: 3 | 6;
   events: Event[];
@@ -1098,6 +1214,7 @@ function CalendarView({
   onOpenComparison: (c: Comparison) => void;
   onEditTreatment: (t: Treatment) => void;
   onEditProduct: (productId: number) => void;
+  onEditInsight: (i: Insight) => void;
 }) {
   const [openDate, setOpenDate] = useState<string | null>(null);
 
@@ -1142,6 +1259,7 @@ function CalendarView({
             ['product-start', 'Product'],
             ['treatment', 'Treatment'],
             ['comparison', 'Compare'],
+            ['insight', 'Insight'],
           ] as const).map(([k, label]) => (
             <span key={k} className="inline-flex items-center gap-1">
               <span className={`h-2 w-2 rounded-full ${TYPE_STYLE[k].dot}`} />
@@ -1160,6 +1278,7 @@ function CalendarView({
           onOpenComparison={onOpenComparison}
           onEditTreatment={onEditTreatment}
           onEditProduct={onEditProduct}
+          onEditInsight={onEditInsight}
         />
       )}
     </>
@@ -1252,6 +1371,7 @@ function DayDetailModal({
   onOpenComparison,
   onEditTreatment,
   onEditProduct,
+  onEditInsight,
 }: {
   date: string;
   events: Event[];
@@ -1260,6 +1380,7 @@ function DayDetailModal({
   onOpenComparison: (c: Comparison) => void;
   onEditTreatment: (t: Treatment) => void;
   onEditProduct: (productId: number) => void;
+  onEditInsight: (i: Insight) => void;
 }) {
   return (
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/40 p-3">
@@ -1297,6 +1418,8 @@ function DayDetailModal({
                 onOpenComparison={onOpenComparison}
                 onPickPhoto={() => {}}
                 pickedIds={[]}
+                onEditProduct={onEditProduct}
+                onEditInsight={onEditInsight}
               />
             </li>
           ))}

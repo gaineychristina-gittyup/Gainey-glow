@@ -17,6 +17,7 @@ const TABLES = [
   'checkins',
   'comparisons',
   'skinRatings',
+  'insights',
 ] as const;
 
 type TableName = (typeof TABLES)[number];
