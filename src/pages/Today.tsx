@@ -61,7 +61,12 @@ export default function Today() {
   const productsToday = useLiveQuery(async () => {
     const all = await db.products.toArray();
     return all
-      .filter((p) => p.startedOn <= date && (!p.stoppedOn || p.stoppedOn >= date))
+      .filter(
+        (p) =>
+          p.inRotation &&
+          p.startedOn <= date &&
+          (!p.stoppedOn || p.stoppedOn >= date),
+      )
       .sort((a, b) => {
         const ao = a.sortOrder;
         const bo = b.sortOrder;
