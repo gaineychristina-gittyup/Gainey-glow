@@ -193,6 +193,16 @@ export interface RoutineLog {
   period: 'am' | 'pm';
 }
 
+// One row per (date, product, period) the user has dismissed from today's
+// routine via swipe-to-delete. Lets us hide scheduled products for a single
+// day without altering their permanent schedule.
+export interface RoutineSkip {
+  id?: number;
+  date: string;
+  productId: number;
+  period: 'am' | 'pm';
+}
+
 export type FeelTag =
   | 'glowy'
   | 'dull'
@@ -274,6 +284,7 @@ class GaineyGlowDB extends Dexie {
   comparisons!: Table<Comparison, number>;
   skinRatings!: Table<SkinRating, number>;
   insights!: Table<Insight, number>;
+  routineSkips!: Table<RoutineSkip, number>;
 
   constructor() {
     super('gainey-glow');
@@ -298,6 +309,9 @@ class GaineyGlowDB extends Dexie {
     });
     this.version(6).stores({
       insights: '++id, date, createdAt',
+    });
+    this.version(7).stores({
+      routineSkips: '++id, date, [date+productId+period]',
     });
   }
 }
