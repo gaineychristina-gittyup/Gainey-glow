@@ -1,17 +1,25 @@
 // Full-screen single-photo viewer with delete and zone-change actions.
 
 import { useEffect, useState } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { Calendar, Trash2, X } from 'lucide-react';
 import { db, ZONES, type PhotoEntry, type Zone } from '../db/schema';
 import { fmtDate } from '../lib/date';
 
 export default function PhotoViewer({
-  photo,
+  photo: initialPhoto,
   onClose,
 }: {
   photo: PhotoEntry;
   onClose: () => void;
 }) {
+  // Stay in sync with the DB so zone/date edits update the UI immediately.
+  const live = useLiveQuery(
+    () => (initialPhoto.id ? db.photos.get(initialPhoto.id) : undefined),
+    [initialPhoto.id],
+  );
+  const photo = live ?? initialPhoto;
+
   const [src, setSrc] = useState<string>();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -100,22 +108,27 @@ export default function PhotoViewer({
         </div>
       )}
 
-      <div className="bg-black/80 px-3 pt-2 pb-1 overflow-x-auto">
-        <div className="flex gap-2 min-w-max">
-          {ZONES.map((z) => (
-            <button
-              key={z.id}
-              onClick={() => setZone(z.id)}
-              disabled={busy}
-              className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${
-                photo.zone === z.id
-                  ? 'bg-white text-glow-800'
-                  : 'bg-white/15 text-white/90 hover:bg-white/25'
-              }`}
-            >
-              {z.label}
-            </button>
-          ))}
+      <div className="bg-black/80 px-3 pt-2 pb-1">
+        <div className="text-[10px] uppercase tracking-wide text-white/60 mb-1">
+          Reclassify region
+        </div>
+        <div className="overflow-x-auto -mx-3 px-3">
+          <div className="flex gap-2 min-w-max">
+            {ZONES.map((z) => (
+              <button
+                key={z.id}
+                onClick={() => setZone(z.id)}
+                disabled={busy}
+                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                  photo.zone === z.id
+                    ? 'bg-white text-glow-800'
+                    : 'bg-white/15 text-white/90 hover:bg-white/25'
+                }`}
+              >
+                {z.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
