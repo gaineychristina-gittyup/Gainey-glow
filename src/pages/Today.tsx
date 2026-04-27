@@ -559,24 +559,7 @@ function SkinRatingCard({ date }: { date: string }) {
       <p className="text-xs text-glow-600 mb-2">
         How does your skin look and feel today? 1 = awful, 5 = glowing.
       </p>
-      <div className="flex items-center gap-3">
-        <input
-          type="range"
-          min={0}
-          max={5}
-          step={1}
-          value={local}
-          onChange={(e) => setLocal(Math.round(Number(e.target.value)))}
-          onPointerUp={(e) => pickRating(Math.round(Number((e.target as HTMLInputElement).value)))}
-          onKeyUp={(e) => pickRating(Math.round(Number((e.target as HTMLInputElement).value)))}
-          className="flex-1 accent-pink-500"
-          aria-label="Skin rating, 0 to 5"
-        />
-        <div className="text-2xl font-display tabular-nums w-10 text-right text-glow-900">
-          {local === 0 ? '—' : local}
-        </div>
-      </div>
-      <div className="mt-2 grid grid-cols-6 gap-1 text-xs select-none">
+      <div className="grid grid-cols-6 gap-1 text-xs select-none">
         {[0, 1, 2, 3, 4, 5].map((n) => (
           <button
             key={n}
