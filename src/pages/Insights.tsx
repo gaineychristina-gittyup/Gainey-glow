@@ -181,37 +181,14 @@ export default function Insights() {
       />
 
       <section className="card">
-        <h3 className="font-display text-lg text-glow-800 mb-2">Concern coverage</h3>
-        <p className="text-xs text-glow-600 mb-3">
-          How many active products target each concern (including via key ingredients).
-        </p>
-        <ul className="space-y-2">
-          {CONCERNS.map((c) => {
-            const entry = concernCounts.get(c.id)!;
-            const count = entry.products.length;
-            return (
-              <li key={c.id}>
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-sm text-glow-900 flex-1">{c.label}</span>
-                  <span className="text-xs text-glow-600">
-                    {count === 0 ? 'no coverage' : `${count} product${count === 1 ? '' : 's'}`}
-                  </span>
-                </div>
-                <div className="h-1.5 mt-1 rounded-full bg-glow-100 overflow-hidden">
-                  <div
-                    className="h-full bg-glow-500"
-                    style={{ width: `${Math.min(100, count * 25)}%` }}
-                  />
-                </div>
-                {count > 0 && (
-                  <div className="text-[11px] text-glow-500 mt-1 truncate">
-                    {entry.products.join(', ')}
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        <h3 className="font-display text-lg text-glow-800 mb-2 flex items-center gap-1.5">
+          <Sparkles size={16} /> Suggestions
+        </h3>
+        <Suggestions
+          uncoveredConcerns={CONCERNS.filter((c) => concernCounts.get(c.id)!.products.length === 0)}
+          overloadedConcerns={CONCERNS.filter((c) => concernCounts.get(c.id)!.products.length >= 4)}
+          flaggedCount={flagged.length}
+        />
       </section>
 
       <section className="card">
@@ -405,14 +382,37 @@ export default function Insights() {
       </section>
 
       <section className="card">
-        <h3 className="font-display text-lg text-glow-800 mb-2 flex items-center gap-1.5">
-          <Sparkles size={16} /> Suggestions
-        </h3>
-        <Suggestions
-          uncoveredConcerns={CONCERNS.filter((c) => concernCounts.get(c.id)!.products.length === 0)}
-          overloadedConcerns={CONCERNS.filter((c) => concernCounts.get(c.id)!.products.length >= 4)}
-          flaggedCount={flagged.length}
-        />
+        <h3 className="font-display text-lg text-glow-800 mb-2">Concern coverage</h3>
+        <p className="text-xs text-glow-600 mb-3">
+          How many active products target each concern (including via key ingredients).
+        </p>
+        <ul className="space-y-2">
+          {CONCERNS.map((c) => {
+            const entry = concernCounts.get(c.id)!;
+            const count = entry.products.length;
+            return (
+              <li key={c.id}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-sm text-glow-900 flex-1">{c.label}</span>
+                  <span className="text-xs text-glow-600">
+                    {count === 0 ? 'no coverage' : `${count} product${count === 1 ? '' : 's'}`}
+                  </span>
+                </div>
+                <div className="h-1.5 mt-1 rounded-full bg-glow-100 overflow-hidden">
+                  <div
+                    className="h-full bg-glow-500"
+                    style={{ width: `${Math.min(100, count * 25)}%` }}
+                  />
+                </div>
+                {count > 0 && (
+                  <div className="text-[11px] text-glow-500 mt-1 truncate">
+                    {entry.products.join(', ')}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
       </section>
     </div>
   );
