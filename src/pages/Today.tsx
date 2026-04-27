@@ -207,10 +207,10 @@ export default function Today() {
         )}
 
         <p className="text-[11px] text-glow-500 mt-2">
-          Photos are stored locally on this device. The in-app camera shows a
-          rule-of-thirds grid and a face-zone outline so framing stays consistent
-          day to day. Uploads read each photo's capture date from its EXIF
-          metadata.
+          Photos are stored locally on this device. The in-app camera frames a
+          tight close-up target — get 4–6 inches from your skin and fill the
+          frame, using the zoom slider for an extra crop. Uploads read each
+          photo's capture date from its EXIF metadata.
         </p>
       </section>
 
