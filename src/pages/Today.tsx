@@ -17,7 +17,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { db, ZONES, type PhotoEntry, type Product, type Zone } from '../db/schema';
+import { db, PRODUCT_STEPS, ZONES, type PhotoEntry, type Product, type Zone } from '../db/schema';
 import { todayISO, fmtDate, relDays, fmtDateShort, shiftDate } from '../lib/date';
 import { makeThumbnail } from '../lib/image';
 import { askLayeringOrder } from '../lib/gemini';
@@ -669,14 +669,20 @@ function SortableRoutineRow({
             {done && <Check size={14} />}
           </span>
           <span className="flex-1 min-w-0 overflow-hidden">
-            <span className={`block truncate font-medium ${done ? 'line-through opacity-70' : ''}`}>
-              {product.name}
+            <span className={`flex items-baseline gap-1.5 min-w-0 ${done ? 'line-through opacity-70' : ''}`}>
+              <span className="chip text-[10px] shrink-0">
+                {PRODUCT_STEPS.find((s) => s.id === product.step)?.label ?? product.step}
+              </span>
+              <span className="truncate text-sm">
+                {product.brand && (
+                  <span className="font-bold text-glow-900">{product.brand} </span>
+                )}
+                <span className="font-medium">{product.name}</span>
+              </span>
             </span>
-            <span className="block text-[11px] text-glow-500 truncate">
-              {product.brand}
-              {product.brand && adHoc ? ' · ' : ''}
-              {adHoc && <span className="text-glow-700">ad-hoc</span>}
-            </span>
+            {adHoc && (
+              <span className="block text-[11px] text-glow-700 truncate">ad-hoc</span>
+            )}
           </span>
         </button>
       </div>
