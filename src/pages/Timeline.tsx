@@ -12,6 +12,7 @@ import {
   Lightbulb,
   Plus,
   Sparkles,
+  Star,
   Trash2,
 } from 'lucide-react';
 import {
@@ -22,6 +23,7 @@ import {
   type Comparison,
   type Insight,
   type PhotoEntry,
+  type SkinRating,
   type Treatment,
 } from '../db/schema';
 import { AFTERCARE } from '../data/aftercare';
@@ -44,9 +46,10 @@ type Event =
   | { kind: 'product-stop'; date: string; sortKey: number; productId?: number; product: { name: string; brand?: string; step: string }; sinceTreatment?: SinceTreatment }
   | { kind: 'treatment'; date: string; sortKey: number; treatment: Treatment }
   | { kind: 'comparison'; date: string; sortKey: number; comparison: Comparison; sinceTreatment?: SinceTreatment }
-  | { kind: 'insight'; date: string; sortKey: number; insight: Insight; sinceTreatment?: SinceTreatment };
+  | { kind: 'insight'; date: string; sortKey: number; insight: Insight; sinceTreatment?: SinceTreatment }
+  | { kind: 'skin-rating'; date: string; sortKey: number; rating: SkinRating; sinceTreatment?: SinceTreatment };
 
-type Filter = 'all' | 'photos' | 'products' | 'treatments' | 'comparisons' | 'insights';
+type Filter = 'all' | 'photos' | 'products' | 'treatments' | 'comparisons' | 'insights' | 'ratings';
 
 const NEW_TREATMENT: Treatment = { type: 'facial', date: todayISO() };
 const newInsight = (): Insight => ({ date: todayISO(), createdAt: Date.now(), text: '' });
@@ -62,6 +65,7 @@ const TYPE_STYLE: Record<
   treatment: { dot: 'bg-violet-500', chip: 'bg-violet-100', chipText: 'text-violet-800' },
   comparison: { dot: 'bg-rose-500', chip: 'bg-rose-100', chipText: 'text-rose-800' },
   insight: { dot: 'bg-teal-500', chip: 'bg-teal-100', chipText: 'text-teal-800' },
+  'skin-rating': { dot: 'bg-yellow-500', chip: 'bg-yellow-100', chipText: 'text-yellow-800' },
 };
 
 export default function Timeline() {
@@ -116,8 +120,10 @@ export default function Timeline() {
   const treatments = useLiveQuery(() => db.treatments.toArray(), []);
   const comparisons = useLiveQuery(() => db.comparisons.toArray(), []);
   const insights = useLiveQuery(() => db.insights.toArray(), []);
+  const skinRatings = useLiveQuery(() => db.skinRatings.toArray(), []);
   const events: Event[] = useMemo(() => {
     const out: Event[] = [];
+    const today = todayISO();
 
     const treatmentsAsc = [...(treatments ?? [])].sort((a, b) => a.date.localeCompare(b.date));
     const lastTreatmentBefore = (date: string): SinceTreatment | undefined => {
@@ -172,6 +178,9 @@ export default function Timeline() {
     });
 
     (treatments ?? []).forEach((t) => {
+      // Future treatments live in the "Upcoming treatments" section above —
+      // don't double them in the historical timeline.
+      if (t.date > today) return;
       out.push({
         kind: 'treatment',
         date: t.date,
@@ -203,8 +212,19 @@ export default function Timeline() {
       });
     });
 
+    (skinRatings ?? []).forEach((r) => {
+      // Show daily ratings near the top of the day, above photos.
+      out.push({
+        kind: 'skin-rating',
+        date: r.date,
+        sortKey: dateKey(r.date) + 0.1,
+        rating: r,
+        sinceTreatment: lastTreatmentBefore(r.date),
+      });
+    });
+
     return out.sort((a, b) => b.sortKey - a.sortKey);
-  }, [photos, products, treatments, comparisons, insights]);
+  }, [photos, products, treatments, comparisons, insights, skinRatings]);
 
   const filtered = useMemo(() => {
     return events.filter((e) => {
@@ -214,6 +234,7 @@ export default function Timeline() {
       if (filter === 'products') return e.kind === 'product-start' || e.kind === 'product-stop';
       if (filter === 'comparisons') return e.kind === 'comparison';
       if (filter === 'insights') return e.kind === 'insight';
+      if (filter === 'ratings') return e.kind === 'skin-rating';
       return true;
     });
   }, [events, filter]);
@@ -243,6 +264,7 @@ export default function Timeline() {
     { id: 'treatments', label: 'Treatments' },
     { id: 'comparisons', label: 'Compares' },
     { id: 'insights', label: 'Insights' },
+    { id: 'ratings', label: 'Ratings' },
   ];
 
   return (
@@ -625,6 +647,8 @@ function Badge({ kind }: { kind: Event['kind'] }) {
       return <span className={cls}><Images size={12} /> Comparison</span>;
     case 'insight':
       return <span className={cls}><Lightbulb size={12} /> Insight</span>;
+    case 'skin-rating':
+      return <span className={cls}><Star size={12} /> Daily rating</span>;
   }
 }
 
@@ -729,7 +753,44 @@ function Body({
           onEdit={onEditInsight}
         />
       );
+    case 'skin-rating':
+      return <SkinRatingBody rating={event.rating} compact={compact} />;
   }
+}
+
+function SkinRatingBody({ rating, compact }: { rating: SkinRating; compact: boolean }) {
+  const stars = (
+    <span className="inline-flex items-center gap-0.5" aria-label={`${rating.rating} of 5`}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <Star
+          key={n}
+          size={14}
+          className={n <= rating.rating ? 'text-yellow-500' : 'text-glow-200'}
+          fill={n <= rating.rating ? 'currentColor' : 'none'}
+        />
+      ))}
+    </span>
+  );
+  const notes = rating.notes?.trim();
+  if (compact) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-glow-700">
+        {stars}
+        {notes && <span className="truncate">{notes}</span>}
+      </div>
+    );
+  }
+  return (
+    <div className="text-sm">
+      <div className="flex items-center gap-2">
+        {stars}
+        <span className="text-xs text-glow-600">{rating.rating}/5</span>
+      </div>
+      {notes && (
+        <div className="text-sm text-glow-800 whitespace-pre-wrap mt-1.5">{notes}</div>
+      )}
+    </div>
+  );
 }
 
 function InsightBody({
@@ -1260,6 +1321,7 @@ function CalendarView({
             ['treatment', 'Treatment'],
             ['comparison', 'Compare'],
             ['insight', 'Insight'],
+            ['skin-rating', 'Rating'],
           ] as const).map(([k, label]) => (
             <span key={k} className="inline-flex items-center gap-1">
               <span className={`h-2 w-2 rounded-full ${TYPE_STYLE[k].dot}`} />
