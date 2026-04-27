@@ -24,11 +24,14 @@ export default function PhotoViewer({
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // Build the object URL from the prop's blob — that reference is stable for
+  // the lifetime of the viewer. The live query returns a fresh Blob instance
+  // on every DB update, which would otherwise revoke the URL mid-view.
   useEffect(() => {
-    const url = URL.createObjectURL(photo.blob);
+    const url = URL.createObjectURL(initialPhoto.blob);
     setSrc(url);
     return () => URL.revokeObjectURL(url);
-  }, [photo.blob]);
+  }, [initialPhoto.blob]);
 
   async function setZone(z: Zone) {
     if (z === photo.zone || !photo.id) return;
