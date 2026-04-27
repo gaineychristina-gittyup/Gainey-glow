@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useLocation } from 'react-router-dom';
-import { Camera, Check, ChevronLeft, ChevronRight, GripVertical, Plus, Sparkles, Sun, Moon, Upload } from 'lucide-react';
+import { Camera, Check, ChevronLeft, ChevronRight, GripVertical, Plus, RotateCcw, Sparkles, Sun, Moon, Trash2, Upload } from 'lucide-react';
 import {
   DndContext,
   PointerSensor,
@@ -343,6 +343,10 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
     () => db.routineLogs.where('date').equals(date).toArray(),
     [date],
   );
+  const skips = useLiveQuery(
+    () => db.routineSkips.where('date').equals(date).toArray(),
+    [date],
+  );
   const [layeringFor, setLayeringFor] = useState<{
     period: 'am' | 'pm';
     list: Product[];
@@ -380,6 +384,30 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
     }
   }
 
+  // Hide a product from today's routine without altering its schedule. Also
+  // clears any "done" log so it doesn't reappear if the user restores it.
+  async function deleteForToday(productId: number, period: 'am' | 'pm') {
+    const log = await db.routineLogs
+      .where('[date+productId+period]')
+      .equals([date, productId, period])
+      .first();
+    if (log?.id) await db.routineLogs.delete(log.id);
+    const skip = await db.routineSkips
+      .where('[date+productId+period]')
+      .equals([date, productId, period])
+      .first();
+    if (!skip) {
+      await db.routineSkips.add({ date, productId, period });
+    }
+  }
+
+  async function restoreSkips(period: 'am' | 'pm') {
+    const ids = (skips ?? [])
+      .filter((s) => s.period === period && s.id != null)
+      .map((s) => s.id!) ;
+    if (ids.length) await db.routineSkips.bulkDelete(ids);
+  }
+
   // Compute today's weekday (0=Sun..6=Sat) from the selected date.
   const [y, mo, d] = date.split('-').map(Number);
   const weekday = new Date(y, (mo ?? 1) - 1, d ?? 1).getDay();
@@ -404,8 +432,16 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
   const adHocPm = products.filter(
     (p) => p.id != null && adHocIds('pm').has(p.id) && !scheduledPm.includes(p),
   );
-  const am = [...scheduledAm, ...adHocAm];
-  const pm = [...scheduledPm, ...adHocPm];
+  const skipKey = (productId: number, period: 'am' | 'pm') => `${productId}-${period}`;
+  const skippedSet = new Set(
+    (skips ?? []).map((s) => skipKey(s.productId, s.period)),
+  );
+  const isSkipped = (productId: number, period: 'am' | 'pm') =>
+    skippedSet.has(skipKey(productId, period));
+  const am = [...scheduledAm, ...adHocAm].filter((p) => !isSkipped(p.id!, 'am'));
+  const pm = [...scheduledPm, ...adHocPm].filter((p) => !isSkipped(p.id!, 'pm'));
+  const skippedProductsFor = (period: 'am' | 'pm') =>
+    products.filter((p) => p.id != null && isSkipped(p.id, period));
   const isAdHoc = (productId: number, period: 'am' | 'pm') =>
     period === 'am'
       ? adHocAm.some((p) => p.id === productId)
@@ -415,7 +451,8 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
       (p) =>
         p.id != null &&
         !(period === 'am' ? scheduledAm : scheduledPm).includes(p) &&
-        !(period === 'am' ? adHocAm : adHocPm).includes(p),
+        !(period === 'am' ? adHocAm : adHocPm).includes(p) &&
+        !isSkipped(p.id, period),
     );
 
   if (products.length === 0) {
@@ -456,8 +493,11 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
           products={am}
           isDone={(id) => isDone(id, 'am')}
           onToggle={(id) => toggle(id, 'am')}
+          onDelete={(id) => deleteForToday(id, 'am')}
           isAdHoc={(id) => isAdHoc(id, 'am')}
           candidates={candidatesFor('am')}
+          skipped={skippedProductsFor('am')}
+          onRestoreSkipped={() => restoreSkips('am')}
           onAdd={async (id) => {
             await db.routineLogs.add({ date, productId: id, period: 'am' });
           }}
@@ -470,8 +510,11 @@ function RoutineChecklist({ date, products }: { date: string; products: Product[
           products={pm}
           isDone={(id) => isDone(id, 'pm')}
           onToggle={(id) => toggle(id, 'pm')}
+          onDelete={(id) => deleteForToday(id, 'pm')}
           isAdHoc={(id) => isAdHoc(id, 'pm')}
           candidates={candidatesFor('pm')}
+          skipped={skippedProductsFor('pm')}
+          onRestoreSkipped={() => restoreSkips('pm')}
           onAdd={async (id) => {
             await db.routineLogs.add({ date, productId: id, period: 'pm' });
           }}
@@ -610,8 +653,11 @@ function RoutineColumn({
   products,
   isDone,
   onToggle,
+  onDelete,
   isAdHoc,
   candidates,
+  skipped,
+  onRestoreSkipped,
   onAdd,
   onReorder,
   onAskAi,
@@ -621,19 +667,26 @@ function RoutineColumn({
   products: Product[];
   isDone: (productId: number) => boolean;
   onToggle: (productId: number) => void;
+  onDelete: (productId: number) => Promise<void>;
   isAdHoc: (productId: number) => boolean;
   candidates: Product[];
+  skipped: Product[];
+  onRestoreSkipped: () => Promise<void>;
   onAdd: (productId: number) => Promise<void>;
   onReorder: (fromIndex: number, toIndex: number) => void;
   onAskAi: () => void;
 }) {
   const [adding, setAdding] = useState(false);
-  // Drag handle is isolated on the right edge with `touch-none`, so it doesn't
-  // collide with vertical scrolling. Activate on a small drag distance for
-  // immediate, thumb-friendly reordering (no long-press required).
+  // Reorder is gated behind a long-press: tap = toggle, swipe-left = delete,
+  // long-press on any row puts the column into edit mode where drag handles
+  // appear and rows can be rearranged. This prevents accidental drags while
+  // also keeping swipe-to-delete unambiguous.
+  const [editMode, setEditMode] = useState(false);
+  // Once in edit mode, dnd-kit handles drag from the visible grip handle on
+  // the right; no activation distance needed since the handle is explicit.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { distance: 4 } }),
   );
   const ids = products.map((p) => p.id!);
 
@@ -650,14 +703,24 @@ function RoutineColumn({
     <div className="min-w-0">
       <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-glow-700 mb-2">
         {icon} {label}
-        <button
-          type="button"
-          onClick={onAskAi}
-          className="ml-auto inline-flex items-center gap-1 rounded-full bg-glow-100 text-glow-800 px-2 py-0.5 text-[10px] font-medium hover:bg-glow-200"
-          title="Ask AI for the best layering order"
-        >
-          <Sparkles size={10} /> AI order
-        </button>
+        {editMode ? (
+          <button
+            type="button"
+            onClick={() => setEditMode(false)}
+            className="ml-auto inline-flex items-center gap-1 rounded-full bg-glow-600 text-white px-2 py-0.5 text-[10px] font-medium hover:bg-glow-700"
+          >
+            Done
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onAskAi}
+            className="ml-auto inline-flex items-center gap-1 rounded-full bg-glow-100 text-glow-800 px-2 py-0.5 text-[10px] font-medium hover:bg-glow-200"
+            title="Ask AI for the best layering order"
+          >
+            <Sparkles size={10} /> AI order
+          </button>
+        )}
       </div>
       {products.length === 0 ? (
         <p className="text-xs text-glow-500">No {label.toLowerCase()} products scheduled.</p>
@@ -671,12 +734,42 @@ function RoutineColumn({
                   product={p}
                   done={isDone(p.id!)}
                   adHoc={isAdHoc(p.id!)}
+                  editMode={editMode}
                   onToggle={() => onToggle(p.id!)}
+                  onDelete={() => onDelete(p.id!)}
+                  onEnterEditMode={() => setEditMode(true)}
                 />
               ))}
             </ul>
           </SortableContext>
         </DndContext>
+      )}
+
+      {editMode && (
+        <p className="mt-1 text-[11px] text-glow-500 italic">
+          Drag the handles to rearrange · tap Done when finished
+        </p>
+      )}
+
+      {skipped.length > 0 && (
+        <div className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-glow-50 border border-glow-100 px-2.5 py-1.5">
+          <span className="text-[11px] text-glow-700 truncate">
+            {skipped.length} skipped today
+            {skipped.length <= 2 && (
+              <span className="text-glow-500">
+                {' · '}
+                {skipped.map((p) => p.name).join(', ')}
+              </span>
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={() => onRestoreSkipped()}
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-glow-700 hover:text-glow-900"
+          >
+            <RotateCcw size={11} /> Restore
+          </button>
+        </div>
       )}
 
       <button
@@ -730,21 +823,33 @@ function RoutineColumn({
   );
 }
 
+const SWIPE_REVEAL_X = -88;
+const SWIPE_DIRECTION_LOCK_PX = 4;
+const LONG_PRESS_MS = 450;
+const LONG_PRESS_MAX_MOVE = 8;
+
 function SortableRoutineRow({
   product,
   done,
   adHoc,
+  editMode,
   onToggle,
+  onDelete,
+  onEnterEditMode,
 }: {
   product: Product;
   done: boolean;
   adHoc: boolean;
+  editMode: boolean;
   onToggle: () => void;
+  onDelete: () => void;
+  onEnterEditMode: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: product.id!,
+    disabled: !editMode,
   });
-  const style: React.CSSProperties = {
+  const liStyle: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.6 : 1,
@@ -752,56 +857,250 @@ function SortableRoutineRow({
   };
   const stepLabel =
     PRODUCT_STEPS.find((s) => s.id === product.step)?.label ?? product.step;
+
+  // Committed swipe position (0 = closed, SWIPE_REVEAL_X = delete revealed).
+  const [swipeX, setSwipeX] = useState(0);
+  // Live drag offset while the finger is down. null when not actively swiping.
+  const [dragOffset, setDragOffset] = useState<number | null>(null);
+  const startRef = useRef<{
+    x: number;
+    y: number;
+    lock: 'none' | 'h' | 'v';
+    longPressTimer: number | null;
+  } | null>(null);
+  // Set when the gesture committed a horizontal drag (or fired a long-press),
+  // so the trailing click from the same pointer interaction is swallowed.
+  const swipedRef = useRef(false);
+
+  // Drag (dnd-kit reorder) cancels any in-progress swipe state.
+  useEffect(() => {
+    if (isDragging) {
+      setDragOffset(null);
+      startRef.current = null;
+    }
+  }, [isDragging]);
+
+  // Leaving edit mode snaps any open swipe closed.
+  useEffect(() => {
+    if (editMode) {
+      setSwipeX(0);
+      setDragOffset(null);
+    }
+  }, [editMode]);
+
+  function cancelLongPress() {
+    const s = startRef.current;
+    if (s && s.longPressTimer != null) {
+      clearTimeout(s.longPressTimer);
+      s.longPressTimer = null;
+    }
+  }
+
+  const offset = dragOffset !== null ? dragOffset : swipeX;
+  const fgStyle: React.CSSProperties = {
+    transform: `translateX(${offset}px)`,
+    transition: dragOffset === null ? 'transform 0.2s ease' : 'none',
+    // In edit mode, dnd-kit owns the gesture on its own handle, so the row
+    // body can scroll freely. Otherwise, lock horizontal so the browser
+    // doesn't steal our swipe.
+    touchAction: editMode ? 'auto' : 'pan-y',
+  };
+
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (isDragging) return;
+    const target = e.target as HTMLElement;
+    // Don't engage when the user starts on the reorder handle or the delete
+    // button beneath the row.
+    if (target.closest('[data-no-swipe]')) return;
+
+    // Schedule a long-press → enter edit mode. Cancelled by movement, lift,
+    // or swipe-direction lock.
+    let timer: number | null = null;
+    if (!editMode) {
+      timer = window.setTimeout(() => {
+        onEnterEditMode();
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+          try {
+            navigator.vibrate(15);
+          } catch {
+            /* ignore */
+          }
+        }
+        swipedRef.current = true; // suppress the trailing click
+        const s = startRef.current;
+        if (s) s.longPressTimer = null;
+      }, LONG_PRESS_MS);
+    }
+    startRef.current = { x: e.clientX, y: e.clientY, lock: 'none', longPressTimer: timer };
+  }
+
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const s = startRef.current;
+    if (!s) return;
+    const dx = e.clientX - s.x;
+    const dy = e.clientY - s.y;
+
+    // Movement past the long-press tolerance cancels the press.
+    if (
+      s.longPressTimer != null &&
+      (Math.abs(dx) > LONG_PRESS_MAX_MOVE || Math.abs(dy) > LONG_PRESS_MAX_MOVE)
+    ) {
+      cancelLongPress();
+    }
+
+    // Reorder mode owns the row; no swipe in edit mode.
+    if (editMode) return;
+
+    if (s.lock === 'none') {
+      if (Math.abs(dx) < SWIPE_DIRECTION_LOCK_PX && Math.abs(dy) < SWIPE_DIRECTION_LOCK_PX) {
+        return;
+      }
+      if (Math.abs(dx) > Math.abs(dy)) {
+        s.lock = 'h';
+        cancelLongPress();
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+          /* ignore */
+        }
+      } else {
+        // Vertical scroll wins; bail so the page can pan.
+        s.lock = 'v';
+        cancelLongPress();
+        startRef.current = null;
+        return;
+      }
+    }
+
+    if (s.lock === 'h') {
+      const next = Math.min(0, Math.max(SWIPE_REVEAL_X * 1.3, swipeX + dx));
+      setDragOffset(next);
+      e.preventDefault();
+    }
+  }
+
+  function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    const s = startRef.current;
+    cancelLongPress();
+    if (s?.lock === 'h' && dragOffset !== null) {
+      const final = dragOffset < SWIPE_REVEAL_X / 2 ? SWIPE_REVEAL_X : 0;
+      setSwipeX(final);
+      swipedRef.current = true;
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+    setDragOffset(null);
+    startRef.current = null;
+  }
+
+  function onPointerCancel() {
+    cancelLongPress();
+    setDragOffset(null);
+    startRef.current = null;
+  }
+
+  function handleToggleClick(e: React.MouseEvent) {
+    if (swipedRef.current) {
+      swipedRef.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (swipeX !== 0) {
+      // Tap on a revealed row closes it instead of toggling done.
+      e.preventDefault();
+      setSwipeX(0);
+      return;
+    }
+    if (editMode) {
+      // In edit mode, tap toggles done as usual; reorder is via the handle.
+      onToggle();
+      return;
+    }
+    onToggle();
+  }
+
+  function handleDelete() {
+    setSwipeX(0);
+    onDelete();
+  }
+
+  const revealed = swipeX !== 0 || (dragOffset !== null && dragOffset < -4);
+
   return (
-    <li ref={setNodeRef} style={style}>
-      <div
-        className={`w-full flex items-stretch gap-1 rounded-xl border pl-2 pr-1 text-left text-sm ${
-          done
-            ? 'bg-glow-100 border-glow-300 text-glow-900'
-            : 'bg-white border-glow-200 text-glow-800'
-        } ${adHoc ? 'border-dashed' : ''}`}
-      >
+    <li ref={setNodeRef} style={liStyle}>
+      <div className="relative overflow-hidden rounded-xl">
         <button
           type="button"
-          onClick={onToggle}
-          className="flex items-center gap-2 flex-1 min-w-0 text-left py-2"
+          data-no-swipe
+          onClick={handleDelete}
+          aria-label={`Remove ${product.name} from today`}
+          tabIndex={revealed ? 0 : -1}
+          className="absolute inset-y-0 right-0 flex items-center justify-center gap-1 bg-red-500 text-white text-xs font-semibold rounded-r-xl"
+          style={{ width: Math.abs(SWIPE_REVEAL_X) }}
         >
-          <span
-            className={`flex h-5 w-5 items-center justify-center rounded-md border shrink-0 ${
-              done ? 'bg-glow-600 border-glow-600 text-white' : 'border-glow-300 bg-white'
-            }`}
-            aria-hidden
-          >
-            {done && <Check size={14} />}
-          </span>
-          <span
-            className={`w-20 shrink-0 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-medium truncate ${STEP_CHIP_CLASSES[product.step]}`}
-            title={stepLabel}
-          >
-            {stepLabel}
-          </span>
-          <span className="flex-1 min-w-0 overflow-hidden">
-            <span
-              className={`block truncate text-sm ${done ? 'line-through opacity-70' : ''}`}
-            >
-              {product.brand && (
-                <span className="font-bold text-glow-900">{product.brand} </span>
-              )}
-              <span className="font-medium">{product.name}</span>
-            </span>
-            {adHoc && (
-              <span className="block text-[11px] text-glow-700 truncate">ad-hoc</span>
-            )}
-          </span>
+          <Trash2 size={14} /> Delete
         </button>
-        <span
-          {...attributes}
-          {...listeners}
-          aria-label="Drag to reorder"
-          className="flex items-center justify-center shrink-0 self-stretch -mr-1 px-3 text-glow-500 hover:text-glow-800 hover:bg-glow-100 active:bg-glow-200 cursor-grab active:cursor-grabbing touch-none rounded-r-xl"
+        <div
+          style={fgStyle}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
+          className={`relative w-full flex items-stretch gap-1 rounded-xl border ${editMode ? 'pl-2 pr-1' : 'pl-2 pr-2'} text-left text-sm select-none ${
+            done
+              ? 'bg-glow-100 border-glow-300 text-glow-900'
+              : 'bg-white border-glow-200 text-glow-800'
+          } ${adHoc ? 'border-dashed' : ''}`}
         >
-          <GripVertical size={22} />
-        </span>
+          <button
+            type="button"
+            onClick={handleToggleClick}
+            className="flex items-center gap-2 flex-1 min-w-0 text-left py-2"
+          >
+            <span
+              className={`flex h-5 w-5 items-center justify-center rounded-md border shrink-0 ${
+                done ? 'bg-glow-600 border-glow-600 text-white' : 'border-glow-300 bg-white'
+              }`}
+              aria-hidden
+            >
+              {done && <Check size={14} />}
+            </span>
+            <span
+              className={`w-20 shrink-0 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-medium truncate ${STEP_CHIP_CLASSES[product.step]}`}
+              title={stepLabel}
+            >
+              {stepLabel}
+            </span>
+            <span className="flex-1 min-w-0 overflow-hidden">
+              <span
+                className={`block truncate text-sm ${done ? 'line-through opacity-70' : ''}`}
+              >
+                {product.brand && (
+                  <span className="font-bold text-glow-900">{product.brand} </span>
+                )}
+                <span className="font-medium">{product.name}</span>
+              </span>
+              {adHoc && (
+                <span className="block text-[11px] text-glow-700 truncate">ad-hoc</span>
+              )}
+            </span>
+          </button>
+          {editMode && (
+            <span
+              data-no-swipe
+              {...attributes}
+              {...listeners}
+              aria-label="Drag to reorder"
+              className="flex items-center justify-center shrink-0 self-stretch -mr-1 px-3 text-glow-500 hover:text-glow-800 hover:bg-glow-100 active:bg-glow-200 cursor-grab active:cursor-grabbing touch-none rounded-r-xl"
+            >
+              <GripVertical size={22} />
+            </span>
+          )}
+        </div>
       </div>
     </li>
   );
