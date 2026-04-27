@@ -17,7 +17,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { db, PRODUCT_STEPS, ZONES, type PhotoEntry, type Product, type Zone } from '../db/schema';
+import { db, PRODUCT_STEPS, STEP_CHIP_CLASSES, ZONES, type PhotoEntry, type Product, type Zone } from '../db/schema';
 import { todayISO, fmtDate, relDays, fmtDateShort, shiftDate } from '../lib/date';
 import { makeThumbnail } from '../lib/image';
 import { askLayeringOrder } from '../lib/gemini';
@@ -524,9 +524,12 @@ function RoutineColumn({
   onAskAi: () => void;
 }) {
   const [adding, setAdding] = useState(false);
+  // Drag handle is isolated on the right edge with `touch-none`, so it doesn't
+  // collide with vertical scrolling. Activate on a small drag distance for
+  // immediate, thumb-friendly reordering (no long-press required).
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { distance: 6 } }),
   );
   const ids = products.map((p) => p.id!);
 
@@ -643,27 +646,21 @@ function SortableRoutineRow({
     opacity: isDragging ? 0.6 : 1,
     zIndex: isDragging ? 10 : undefined,
   };
+  const stepLabel =
+    PRODUCT_STEPS.find((s) => s.id === product.step)?.label ?? product.step;
   return (
     <li ref={setNodeRef} style={style}>
       <div
-        className={`w-full flex items-center gap-1 rounded-xl border px-2 py-2 text-left text-sm ${
+        className={`w-full flex items-stretch gap-1 rounded-xl border pl-2 pr-1 text-left text-sm ${
           done
             ? 'bg-glow-100 border-glow-300 text-glow-900'
             : 'bg-white border-glow-200 text-glow-800'
         } ${adHoc ? 'border-dashed' : ''}`}
       >
-        <span
-          {...attributes}
-          {...listeners}
-          aria-label="Drag to reorder"
-          className="p-1 rounded-md text-glow-400 hover:text-glow-700 hover:bg-glow-100 cursor-grab active:cursor-grabbing touch-none shrink-0"
-        >
-          <GripVertical size={14} />
-        </span>
         <button
           type="button"
           onClick={onToggle}
-          className="flex items-center gap-2 flex-1 min-w-0 text-left"
+          className="flex items-center gap-2 flex-1 min-w-0 text-left py-2"
         >
           <span
             className={`flex h-5 w-5 items-center justify-center rounded-md border shrink-0 ${
@@ -673,23 +670,34 @@ function SortableRoutineRow({
           >
             {done && <Check size={14} />}
           </span>
+          <span
+            className={`w-20 shrink-0 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-medium truncate ${STEP_CHIP_CLASSES[product.step]}`}
+            title={stepLabel}
+          >
+            {stepLabel}
+          </span>
           <span className="flex-1 min-w-0 overflow-hidden">
-            <span className={`flex items-baseline gap-1.5 min-w-0 ${done ? 'line-through opacity-70' : ''}`}>
-              <span className="chip text-[10px] shrink-0">
-                {PRODUCT_STEPS.find((s) => s.id === product.step)?.label ?? product.step}
-              </span>
-              <span className="truncate text-sm">
-                {product.brand && (
-                  <span className="font-bold text-glow-900">{product.brand} </span>
-                )}
-                <span className="font-medium">{product.name}</span>
-              </span>
+            <span
+              className={`block truncate text-sm ${done ? 'line-through opacity-70' : ''}`}
+            >
+              {product.brand && (
+                <span className="font-bold text-glow-900">{product.brand} </span>
+              )}
+              <span className="font-medium">{product.name}</span>
             </span>
             {adHoc && (
               <span className="block text-[11px] text-glow-700 truncate">ad-hoc</span>
             )}
           </span>
         </button>
+        <span
+          {...attributes}
+          {...listeners}
+          aria-label="Drag to reorder"
+          className="flex items-center justify-center shrink-0 self-stretch -mr-1 px-3 text-glow-500 hover:text-glow-800 hover:bg-glow-100 active:bg-glow-200 cursor-grab active:cursor-grabbing touch-none rounded-r-xl"
+        >
+          <GripVertical size={22} />
+        </span>
       </div>
     </li>
   );

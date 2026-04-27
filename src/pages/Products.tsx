@@ -22,6 +22,7 @@ import {
   CONCERNS,
   PRODUCT_CATEGORIES,
   PRODUCT_STEPS,
+  STEP_CHIP_CLASSES,
   WEEKDAYS,
   db,
   type Concern,
@@ -455,7 +456,9 @@ function MultiScanModal({
                       </div>
                       <div className="mt-1 flex flex-wrap gap-1.5">
                         {r.step && (
-                          <span className="chip text-[10px]">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-medium ${STEP_CHIP_CLASSES[r.step]}`}
+                          >
                             {PRODUCT_STEPS.find((s) => s.id === r.step)?.label ?? r.step}
                           </span>
                         )}
@@ -636,7 +639,11 @@ function ProductCard({
               <span className="text-sm text-glow-700 truncate">{product.name}</span>
             </div>
             <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
-              <span className="chip text-[10px]">{stepLabel}</span>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-medium ${STEP_CHIP_CLASSES[product.step]}`}
+              >
+                {stepLabel}
+              </span>
               <span className="text-[10px] text-glow-500">{timeLabel}</span>
               {product.rating ? (
                 <span className="inline-flex items-center gap-0.5">
