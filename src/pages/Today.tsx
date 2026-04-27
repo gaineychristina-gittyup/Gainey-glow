@@ -64,7 +64,7 @@ export default function Today() {
       .filter(
         (p) =>
           p.inRotation &&
-          p.startedOn <= date &&
+          (!p.startedOn || p.startedOn <= date) &&
           (!p.stoppedOn || p.stoppedOn >= date),
       )
       .sort((a, b) => {
@@ -73,7 +73,10 @@ export default function Today() {
         if (ao !== undefined && bo !== undefined) return ao - bo;
         if (ao !== undefined) return -1;
         if (bo !== undefined) return 1;
-        return b.startedOn.localeCompare(a.startedOn);
+        if (a.startedOn && b.startedOn) return b.startedOn.localeCompare(a.startedOn);
+        if (a.startedOn) return -1;
+        if (b.startedOn) return 1;
+        return 0;
       });
   }, [date]);
 

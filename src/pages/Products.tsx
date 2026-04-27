@@ -72,7 +72,10 @@ export default function Products() {
       if (ao !== undefined && bo !== undefined) return ao - bo;
       if (ao !== undefined) return -1;
       if (bo !== undefined) return 1;
-      return b.startedOn.localeCompare(a.startedOn);
+      if (a.startedOn && b.startedOn) return b.startedOn.localeCompare(a.startedOn);
+      if (a.startedOn) return -1;
+      if (b.startedOn) return 1;
+      return 0;
     });
   }, []);
   const sensitivities = useLiveQuery(() => db.sensitivities.toArray(), []);
@@ -735,10 +738,13 @@ function ProductCard({
 
       {expanded && (
         <div className="mt-3 space-y-3 border-t border-glow-100 pt-3">
-          <div className="text-[11px] text-glow-500">
-            Started {fmtDate(product.startedOn)}
-            {product.stoppedOn ? ` · stopped ${fmtDate(product.stoppedOn)}` : ''}
-          </div>
+          {(product.startedOn || product.stoppedOn) && (
+            <div className="text-[11px] text-glow-500">
+              {product.startedOn ? `Started ${fmtDate(product.startedOn)}` : ''}
+              {product.startedOn && product.stoppedOn ? ' · ' : ''}
+              {product.stoppedOn ? `stopped ${fmtDate(product.stoppedOn)}` : ''}
+            </div>
+          )}
 
           {concernSet.size > 0 && (
             <div>
@@ -866,12 +872,23 @@ function ProductEditor({
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="label">Started</label>
+            <div className="flex items-center justify-between">
+              <label className="label">Started (optional)</label>
+              {draft.startedOn ? (
+                <button
+                  type="button"
+                  onClick={() => update('startedOn', undefined)}
+                  className="text-[11px] text-glow-600 hover:underline"
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
             <input
               type="date"
               className="input"
-              value={draft.startedOn}
-              onChange={(e) => update('startedOn', e.target.value)}
+              value={draft.startedOn ?? ''}
+              onChange={(e) => update('startedOn', e.target.value || undefined)}
             />
           </div>
           <div>

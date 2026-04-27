@@ -138,14 +138,16 @@ export default function Timeline() {
     });
 
     (products ?? []).forEach((p) => {
-      out.push({
-        kind: 'product-start',
-        date: p.startedOn,
-        sortKey: dateKey(p.startedOn) - 0.1,
-        productId: p.id,
-        product: { name: p.name, brand: p.brand, step: p.step },
-        sinceTreatment: lastTreatmentBefore(p.startedOn),
-      });
+      if (p.startedOn) {
+        out.push({
+          kind: 'product-start',
+          date: p.startedOn,
+          sortKey: dateKey(p.startedOn) - 0.1,
+          productId: p.id,
+          product: { name: p.name, brand: p.brand, step: p.step },
+          sinceTreatment: lastTreatmentBefore(p.startedOn),
+        });
+      }
       if (p.stoppedOn) {
         out.push({
           kind: 'product-stop',
@@ -859,7 +861,7 @@ function PreTreatmentGuidanceModal({
       try {
         const today = todayISO();
         const active = (products ?? []).filter(
-          (p) => p.startedOn <= today && (!p.stoppedOn || p.stoppedOn >= today),
+          (p) => (!p.startedOn || p.startedOn <= today) && (!p.stoppedOn || p.stoppedOn >= today),
         );
         const result = await askPreTreatmentGuidance({
           treatmentName:
