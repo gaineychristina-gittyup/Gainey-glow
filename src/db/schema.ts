@@ -75,6 +75,22 @@ export const PRODUCT_STEPS: { id: ProductStep; label: string }[] = [
   { id: 'exfoliant', label: 'Exfoliant' },
 ];
 
+// Per-step color palette for chips. Full class strings so Tailwind keeps them
+// in the production bundle (it scans source for literals; dynamic
+// concatenation would be purged).
+export const STEP_CHIP_CLASSES: Record<ProductStep, string> = {
+  cleanser:    'bg-sky-100 text-sky-800 border border-sky-200',
+  toner:       'bg-cyan-100 text-cyan-800 border border-cyan-200',
+  serum:       'bg-amber-100 text-amber-800 border border-amber-200',
+  treatment:   'bg-purple-100 text-purple-800 border border-purple-200',
+  moisturizer: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
+  eye:         'bg-indigo-100 text-indigo-800 border border-indigo-200',
+  sunscreen:   'bg-orange-100 text-orange-800 border border-orange-200',
+  mask:        'bg-pink-100 text-pink-800 border border-pink-200',
+  oil:         'bg-yellow-100 text-yellow-800 border border-yellow-200',
+  exfoliant:   'bg-rose-100 text-rose-800 border border-rose-200',
+};
+
 export type ProductCategory = 'topical' | 'supplement' | 'medication';
 
 export const PRODUCT_CATEGORIES: { id: ProductCategory; label: string }[] = [
