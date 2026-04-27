@@ -67,6 +67,98 @@ const RESPONSE_SCHEMA = {
   required: ['products'],
 };
 
+// generateContent wrapper with retry on transient upstream errors.
+// Gemini occasionally returns 503 UNAVAILABLE ("This model is currently
+// experiencing high demand…") or 500 INTERNAL during traffic spikes —
+// a couple of short retries usually clears them.
+const RETRYABLE_STATUSES = new Set([500, 502, 503, 504]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function backoffMs(attempt: number): number {
+  // 1s, 2s, 4s with ±25% jitter
+  const base = 1000 * 2 ** (attempt - 1);
+  const jitter = base * 0.25 * (Math.random() * 2 - 1);
+  return Math.round(base + jitter);
+}
+
+interface CallOptions {
+  maxAttempts?: number;
+}
+
+async function callGenerateContent(
+  model: string,
+  key: string,
+  body: unknown,
+  opts: CallOptions = {},
+): Promise<any> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model,
+  )}:generateContent?key=${encodeURIComponent(key)}`;
+  const maxAttempts = opts.maxAttempts ?? 3;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      if (attempt < maxAttempts) {
+        await sleep(backoffMs(attempt));
+        continue;
+      }
+      const detail = err instanceof Error ? err.message : 'network error';
+      throw new Error(`Network error contacting Gemini: ${detail}`);
+    }
+
+    if (res.ok) return res.json();
+
+    const text = await res.text();
+    let upstreamMsg = '';
+    try {
+      const j = JSON.parse(text);
+      if (j?.error?.message) upstreamMsg = String(j.error.message);
+    } catch {
+      // body wasn't JSON
+    }
+
+    const looksOverloaded =
+      RETRYABLE_STATUSES.has(res.status) ||
+      /overload|high demand|unavailable|try again/i.test(upstreamMsg);
+
+    if (looksOverloaded && attempt < maxAttempts) {
+      await sleep(backoffMs(attempt));
+      continue;
+    }
+
+    if (res.status === 400 && /api key/i.test(upstreamMsg)) {
+      throw new Error('API key not valid. Check it in Settings.');
+    }
+    if (res.status === 403) {
+      throw new Error(
+        `${upstreamMsg || 'Gemini access denied'} (Make sure the Generative Language API is enabled for this key.)`,
+      );
+    }
+    if (res.status === 429) {
+      throw new Error('Gemini rate limit reached. Wait a minute and try again.');
+    }
+    if (looksOverloaded) {
+      throw new Error(
+        "Gemini is overloaded right now. We retried but it's still busy — please try again in a minute, or switch models in Settings.",
+      );
+    }
+    throw new Error(upstreamMsg || `Gemini request failed (${res.status})`);
+  }
+
+  // Unreachable — the loop either returns or throws.
+  throw new Error('Gemini request failed.');
+}
+
 async function blobToBase64(blob: Blob): Promise<{ data: string; mime: string }> {
   const buf = await blob.arrayBuffer();
   let binary = '';
@@ -99,10 +191,6 @@ export async function scanProductsFromImage(image: Blob): Promise<ScannedProduct
   const model = getGeminiModel();
   const { data, mime } = await blobToBase64(image);
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    model,
-  )}:generateContent?key=${encodeURIComponent(key)}`;
-
   const body = {
     contents: [
       {
@@ -120,32 +208,7 @@ export async function scanProductsFromImage(image: Blob): Promise<ScannedProduct
     },
   };
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    let msg = `Gemini request failed (${res.status})`;
-    try {
-      const j = JSON.parse(text);
-      if (j?.error?.message) msg = j.error.message;
-    } catch {
-      // keep default msg
-    }
-    if (res.status === 400 && /api key/i.test(msg)) {
-      msg = 'API key not valid. Check it in Settings.';
-    } else if (res.status === 429) {
-      msg = 'Gemini rate limit reached. Wait a minute and try again.';
-    } else if (res.status === 403) {
-      msg = `${msg} (Make sure the Generative Language API is enabled for this key.)`;
-    }
-    throw new Error(msg);
-  }
-
-  const json = await res.json();
+  const json = await callGenerateContent(model, key, body);
   const candidate = json?.candidates?.[0];
   const finishReason: string | undefined = candidate?.finishReason;
   const text: string | undefined = candidate?.content?.parts?.[0]?.text;
@@ -203,10 +266,6 @@ export async function classifyPhotoZone(image: Blob): Promise<Zone> {
   const model = getGeminiModel();
   const { data, mime } = await blobToBase64(image);
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    model,
-  )}:generateContent?key=${encodeURIComponent(key)}`;
-
   const body = {
     contents: [
       {
@@ -224,15 +283,7 @@ export async function classifyPhotoZone(image: Blob): Promise<Zone> {
     },
   };
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) throw new Error(`Gemini classify failed (${res.status})`);
-
-  const json = await res.json();
+  const json = await callGenerateContent(model, key, body);
   const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) return 'full';
   try {
@@ -312,10 +363,6 @@ For each recommendation provide:
 Mix price tiers when reasonable. Stick to products commonly available in the US/EU.
 This is informational, not medical advice.`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    model,
-  )}:generateContent?key=${encodeURIComponent(key)}`;
-
   const body = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: {
@@ -325,27 +372,7 @@ This is informational, not medical advice.`;
     },
   };
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    let msg = `Gemini request failed (${res.status})`;
-    try {
-      const j = JSON.parse(text);
-      if (j?.error?.message) msg = j.error.message;
-    } catch {
-      // keep default
-    }
-    if (res.status === 400 && /api key/i.test(msg)) msg = 'API key not valid. Check it in Settings.';
-    else if (res.status === 429) msg = 'Gemini rate limit reached. Wait a minute and try again.';
-    throw new Error(msg);
-  }
-
-  const json = await res.json();
+  const json = await callGenerateContent(model, key, body);
   const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('Gemini returned no recommendations.');
   const parsed = JSON.parse(text);
@@ -429,10 +456,6 @@ Return:
 For the AM, finish with sunscreen if any. For the PM, follow standard
 thinnest-to-thickest ordering with actives near the start.`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    model,
-  )}:generateContent?key=${encodeURIComponent(key)}`;
-
   const body = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: {
@@ -442,25 +465,7 @@ thinnest-to-thickest ordering with actives near the start.`;
     },
   };
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    let msg = `Gemini request failed (${res.status})`;
-    try {
-      const j = JSON.parse(text);
-      if (j?.error?.message) msg = j.error.message;
-    } catch {
-      // keep default
-    }
-    if (res.status === 400 && /api key/i.test(msg)) msg = 'API key not valid. Check it in Settings.';
-    else if (res.status === 429) msg = 'Gemini rate limit reached. Wait a minute and try again.';
-    throw new Error(msg);
-  }
-  const json = await res.json();
+  const json = await callGenerateContent(model, key, body);
   const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('Gemini returned no plan.');
   const parsed = JSON.parse(text);
@@ -540,10 +545,6 @@ Then 2–4 general pre-treatment tips (sun avoidance, no waxing, hydration,
 etc). This is informational, not medical advice — defer to the
 provider's specific instructions.`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    model,
-  )}:generateContent?key=${encodeURIComponent(key)}`;
-
   const body = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: {
@@ -553,25 +554,7 @@ provider's specific instructions.`;
     },
   };
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    let msg = `Gemini request failed (${res.status})`;
-    try {
-      const j = JSON.parse(text);
-      if (j?.error?.message) msg = j.error.message;
-    } catch {
-      // keep default
-    }
-    if (res.status === 400 && /api key/i.test(msg)) msg = 'API key not valid. Check it in Settings.';
-    else if (res.status === 429) msg = 'Gemini rate limit reached. Wait a minute and try again.';
-    throw new Error(msg);
-  }
-  const json = await res.json();
+  const json = await callGenerateContent(model, key, body);
   const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('Gemini returned no guidance.');
   const parsed = JSON.parse(text);
@@ -631,35 +614,13 @@ Answer the user's question directly and concretely. Use their routine context ab
 - Keep it under ~250 words. Use short paragraphs and small bullet lists when helpful.
 - Plain text only — no markdown headings, no code fences. This is informational, not medical advice.`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    model,
-  )}:generateContent?key=${encodeURIComponent(key)}`;
-
   const body = {
     contents: [{ role: 'user', parts: [{ text: lines.join('\n') }] }],
     systemInstruction: { parts: [{ text: system }] },
     generationConfig: { temperature: 0.5 },
   };
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    let msg = `Gemini request failed (${res.status})`;
-    try {
-      const j = JSON.parse(text);
-      if (j?.error?.message) msg = j.error.message;
-    } catch {
-      // keep default
-    }
-    if (res.status === 400 && /api key/i.test(msg)) msg = 'API key not valid. Check it in Settings.';
-    else if (res.status === 429) msg = 'Gemini rate limit reached. Wait a minute and try again.';
-    throw new Error(msg);
-  }
-  const json = await res.json();
+  const json = await callGenerateContent(model, key, body);
   const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('Gemini returned no answer.');
   return text.trim();
