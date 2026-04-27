@@ -35,7 +35,7 @@ import {
   findIngredientInfo,
   findIrritant,
 } from '../data/ingredientReference';
-import { fmtDate, todayISO } from '../lib/date';
+import { fmtDate } from '../lib/date';
 import { scanProductsFromImage, type ScannedProduct } from '../lib/gemini';
 import { getGeminiKey } from '../lib/settings';
 import ChipMultiSelect from '../components/ChipMultiSelect';
@@ -47,7 +47,6 @@ const blank: Product = {
   category: 'topical',
   concerns: [],
   ingredients: [],
-  startedOn: todayISO(),
   timeOfDay: ['am', 'pm'],
   notes: '',
   inRotation: true,
@@ -307,7 +306,6 @@ export default function Products() {
                 step: r.step ?? 'serum',
                 concerns: r.concerns,
                 ingredients: r.ingredients,
-                startedOn: todayISO(),
                 timeOfDay: ['am', 'pm'],
                 notes: r.notes,
                 inRotation: true,
@@ -422,7 +420,7 @@ function MultiScanModal({
         </div>
 
         <p className="text-xs text-glow-600 mb-3">
-          Tap to deselect any you don't want to add. Defaults: started today, used AM/PM.
+          Tap to deselect any you don't want to add. Defaults: AM/PM, no start date.
           You can edit each one after saving.
         </p>
 

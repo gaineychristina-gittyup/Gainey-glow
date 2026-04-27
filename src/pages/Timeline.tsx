@@ -380,6 +380,7 @@ export default function Timeline() {
                         onPickPhoto={togglePick}
                         pickedIds={picked.map((x) => x.id!)}
                         onOpenDay={(date) => setOpenDate(date)}
+                        onEditProduct={(pid) => navigate('/products', { state: { editProductId: pid } })}
                       />
                     </li>
                   </Fragment>
@@ -483,6 +484,7 @@ function TimelineCard({
   onPickPhoto,
   pickedIds,
   onOpenDay,
+  onEditProduct,
 }: {
   event: Event;
   compact: boolean;
@@ -492,6 +494,7 @@ function TimelineCard({
   onPickPhoto: (p: PhotoEntry) => void;
   pickedIds: number[];
   onOpenDay: (date: string) => void;
+  onEditProduct: (productId: number) => void;
 }) {
   const since = event.kind === 'treatment' ? undefined : event.sinceTreatment;
   return (
@@ -525,6 +528,7 @@ function TimelineCard({
           onOpenComparison={onOpenComparison}
           onPickPhoto={onPickPhoto}
           pickedIds={pickedIds}
+          onEditProduct={onEditProduct}
         />
       </div>
     </div>
@@ -556,6 +560,7 @@ function Body({
   onOpenComparison,
   onPickPhoto,
   pickedIds,
+  onEditProduct,
 }: {
   event: Event;
   compact: boolean;
@@ -564,6 +569,7 @@ function Body({
   onOpenComparison: (c: Comparison) => void;
   onPickPhoto: (p: PhotoEntry) => void;
   pickedIds: number[];
+  onEditProduct?: (productId: number) => void;
 }) {
   switch (event.kind) {
     case 'photo':
@@ -610,7 +616,17 @@ function Body({
     case 'product-stop':
       return (
         <div className="text-sm">
-          <div className="font-medium text-glow-900">{event.product.name}</div>
+          {event.productId && onEditProduct ? (
+            <button
+              type="button"
+              onClick={() => onEditProduct(event.productId!)}
+              className="font-medium text-glow-900 hover:underline text-left"
+            >
+              {event.product.name}
+            </button>
+          ) : (
+            <div className="font-medium text-glow-900">{event.product.name}</div>
+          )}
           <div className="text-xs text-glow-600">
             {event.product.brand ? `${event.product.brand} · ` : ''}
             {PRODUCT_STEPS.find((s) => s.id === event.product.step)?.label}
