@@ -19,7 +19,8 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { db, PRODUCT_STEPS, STEP_CHIP_CLASSES, ZONES, type PhotoEntry, type Product, type Zone } from '../db/schema';
 import { todayISO, fmtDate, relDays, fmtDateShort, shiftDate } from '../lib/date';
-import { makeThumbnail } from '../lib/image';
+import { compressForStorage, makeThumbnail } from '../lib/image';
+import { requestPersistentStorage } from '../lib/storage';
 import { askLayeringOrder } from '../lib/gemini';
 import { getGeminiKey } from '../lib/settings';
 import ZonePicker from '../components/ZonePicker';
@@ -90,17 +91,19 @@ export default function Today() {
     setBusy(true);
     setSummary(null);
     try {
-      const { thumb, width, height } = await makeThumbnail(blob, 480);
+      const compressed = await compressForStorage(blob);
+      const { thumb } = await makeThumbnail(compressed.blob, 480);
       await db.photos.add({
         date,
         takenAt: Date.now(),
         zone,
-        blob,
+        blob: compressed.blob,
         thumb,
-        width,
-        height,
+        width: compressed.width,
+        height: compressed.height,
         notes: notes.trim() || undefined,
       });
+      void requestPersistentStorage();
       setNotes('');
       setSummary({ count: 1, withExif: 0, earliest: date, latest: date });
     } finally {
