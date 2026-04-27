@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Download, ExternalLink, Eye, EyeOff, Upload, X } from 'lucide-react';
+import { Check, Database, Download, ExternalLink, Eye, EyeOff, Lock, Upload, X } from 'lucide-react';
 import {
   getGeminiKey,
   getGeminiModel,
@@ -7,6 +7,7 @@ import {
   setGeminiModel,
 } from '../lib/settings';
 import { exportAll, importAll, suggestedFilename } from '../lib/backup';
+import { getStorageInfo, requestPersistentStorage, type StorageInfo } from '../lib/storage';
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [key, setKey] = useState(getGeminiKey());
@@ -17,6 +18,22 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [backupBusy, setBackupBusy] = useState<'idle' | 'export' | 'import'>('idle');
   const [backupMsg, setBackupMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [storage, setStorage] = useState<StorageInfo | null>(null);
+  const [persistBusy, setPersistBusy] = useState(false);
+
+  useEffect(() => {
+    void getStorageInfo().then(setStorage);
+  }, []);
+
+  async function handleMakePersistent() {
+    setPersistBusy(true);
+    try {
+      await requestPersistentStorage();
+      setStorage(await getStorageInfo());
+    } finally {
+      setPersistBusy(false);
+    }
+  }
 
   async function handleExport() {
     setBackupBusy('export');
@@ -164,6 +181,68 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
         </section>
 
         <section className="space-y-2 mt-6 pt-4 border-t border-glow-100">
+          <h4 className="font-display text-base text-glow-800 inline-flex items-center gap-2">
+            <Database size={16} /> On-device storage
+          </h4>
+          <p className="text-xs text-glow-600">
+            Photos and notes live in this browser's IndexedDB. Granting
+            persistent storage tells the browser not to evict your data
+            when disk space gets tight.
+          </p>
+          {storage ? (
+            <>
+              <div className="rounded-lg bg-glow-50 border border-glow-100 px-3 py-2 text-xs text-glow-700">
+                <div className="flex justify-between">
+                  <span>Used</span>
+                  <span className="font-medium tabular-nums">{formatBytes(storage.usage)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Available</span>
+                  <span className="font-medium tabular-nums">
+                    {storage.quota > 0 ? formatBytes(storage.quota) : 'unknown'}
+                  </span>
+                </div>
+                {storage.quota > 0 && (
+                  <div className="mt-2 h-1.5 rounded-full bg-glow-200 overflow-hidden">
+                    <div
+                      className="h-full bg-glow-600"
+                      style={{
+                        width: `${Math.min(100, (storage.usage / storage.quota) * 100).toFixed(1)}%`,
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+              {storage.persistent ? (
+                <p className="text-[11px] text-emerald-700 inline-flex items-center gap-1">
+                  <Check size={12} /> Storage is persistent on this device.
+                </p>
+              ) : (
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-glow-500">
+                    Not yet persistent — the browser may evict data under
+                    storage pressure.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn-soft text-xs shrink-0"
+                    onClick={handleMakePersistent}
+                    disabled={persistBusy}
+                  >
+                    <Lock size={12} />
+                    {persistBusy ? 'Asking…' : 'Make persistent'}
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-[11px] text-glow-500">
+              Storage stats are not available in this browser.
+            </p>
+          )}
+        </section>
+
+        <section className="space-y-2 mt-6 pt-4 border-t border-glow-100">
           <h4 className="font-display text-base text-glow-800">Backup &amp; restore</h4>
           <p className="text-xs text-glow-600">
             All your data lives on this device. Export a single JSON file
@@ -226,7 +305,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function errMessage(e: unknown): string {

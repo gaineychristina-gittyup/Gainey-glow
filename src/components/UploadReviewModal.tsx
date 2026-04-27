@@ -7,9 +7,10 @@ import { Loader2, Sparkles, X } from 'lucide-react';
 import { db, ZONES, type Zone } from '../db/schema';
 import { fmtDateShort } from '../lib/date';
 import { readPhotoDate, type DateSource } from '../lib/exif';
-import { makeThumbnail } from '../lib/image';
+import { compressForStorage, makeThumbnail } from '../lib/image';
 import { classifyPhotoZone } from '../lib/gemini';
 import { getGeminiKey } from '../lib/settings';
+import { requestPersistentStorage } from '../lib/storage';
 
 interface PendingItem {
   file: File;
@@ -113,17 +114,19 @@ export default function UploadReviewModal({
       const dates: string[] = [];
       for (const it of items) {
         if (it.source === 'exif') withExif += 1;
+        const compressed = await compressForStorage(it.file);
         await db.photos.add({
           date: it.date,
           takenAt: it.takenAt,
           zone: it.zone,
-          blob: it.file,
+          blob: compressed.blob,
           thumb: it.thumbBlob,
-          width: it.width,
-          height: it.height,
+          width: compressed.width,
+          height: compressed.height,
         });
         dates.push(it.date);
       }
+      void requestPersistentStorage();
       const sorted = [...dates].sort();
       onSaved({
         count: items.length,
