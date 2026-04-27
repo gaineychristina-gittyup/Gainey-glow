@@ -257,19 +257,24 @@ export default function CompareSlider({
           draggable={false}
           style={{ ...beforeStyle, willChange: 'transform' }}
         />
-        <img
-          ref={afterImgRef}
-          src={after}
-          alt="after"
-          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+        {/* The clip lives on a wrapper div so panning/zooming the after
+            image doesn't drag the clip edge with it on screen. */}
+        <div
+          className="absolute inset-0 overflow-hidden pointer-events-none"
           style={{
-            ...afterStyle,
-            willChange: 'transform',
             clipPath: `inset(0 0 0 ${s.pos}%)`,
             WebkitClipPath: `inset(0 0 0 ${s.pos}%)`,
           }}
-          draggable={false}
-        />
+        >
+          <img
+            ref={afterImgRef}
+            src={after}
+            alt="after"
+            className="absolute inset-0 w-full h-full object-cover"
+            style={{ ...afterStyle, willChange: 'transform' }}
+            draggable={false}
+          />
+        </div>
         <div
           className="absolute top-0 bottom-0 w-px bg-white/90 shadow-[0_0_8px_rgba(0,0,0,0.4)] pointer-events-none"
           style={{ left: `${s.pos}%` }}
