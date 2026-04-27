@@ -84,6 +84,7 @@ export default function Compare() {
       });
     });
     (products ?? []).forEach((p) => {
+      if (!p.startedOn) return;
       out.push({
         kind: 'product',
         id: p.id!,

@@ -107,7 +107,7 @@ export interface Product {
   category?: ProductCategory; // defaults to 'topical' if absent (older rows)
   concerns: Concern[];
   ingredients: string[];          // free-form list (lowercased on input)
-  startedOn: string;              // ISO date
+  startedOn?: string;             // ISO date (optional — user may not know)
   stoppedOn?: string;             // ISO date if discontinued
   timeOfDay: ('am' | 'pm')[];
   notes?: string;

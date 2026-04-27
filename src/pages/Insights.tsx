@@ -16,7 +16,7 @@ export default function Insights() {
 
   const today = todayISO();
   const active = useMemo(
-    () => (products ?? []).filter((p) => p.startedOn <= today && (!p.stoppedOn || p.stoppedOn >= today)),
+    () => (products ?? []).filter((p) => (!p.startedOn || p.startedOn <= today) && (!p.stoppedOn || p.stoppedOn >= today)),
     [products, today],
   );
 
@@ -91,6 +91,7 @@ export default function Insights() {
     if (valid.length < 6 || !products) return [];
     return products
       .map((p) => {
+        if (!p.startedOn) return null;
         const start = p.startedOn;
         const stop = p.stoppedOn ?? '9999-12-31';
         const on = valid.filter((r) => r.date >= start && r.date <= stop);
