@@ -1,9 +1,10 @@
-// Full-screen in-app camera with a rule-of-thirds grid and zone-specific
-// framing guides. Lets the user line up the same shot every day.
+// Full-screen in-app camera optimized for close-up skin shots. Shows a small
+// centered framing target ("fill this with skin") and a digital zoom slider so
+// users can crop tight even when the front camera has a wide field of view.
 
 import { useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Camera, Eye, EyeOff, RefreshCcw, X } from 'lucide-react';
+import { Camera, Eye, EyeOff, Grid3x3, RefreshCcw, X, ZoomIn } from 'lucide-react';
 import { db, ZONES, type Zone } from '../db/schema';
 
 interface Props {
@@ -13,6 +14,9 @@ interface Props {
   onClose: () => void;
 }
 
+const ZMIN = 1;
+const ZMAX = 4;
+
 export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [facing, setFacing] = useState<'user' | 'environment'>('user');
@@ -21,6 +25,8 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
   const [ghost, setGhost] = useState(true);
   const [ghostOpacity, setGhostOpacity] = useState(0.4);
   const [ghostUrl, setGhostUrl] = useState<string | null>(null);
+  const [showGrid, setShowGrid] = useState(false);
+  const [zoom, setZoom] = useState(1);
 
   // Most recent photo for the selected zone, used as a "ghost" overlay so
   // the user can frame the shot the same way every day.
@@ -50,7 +56,7 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: facing,
-            width: { ideal: 1080 },
+            width: { ideal: 1440 },
             height: { ideal: 1440 },
           },
           audio: false,
@@ -74,15 +80,30 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
     };
   }, [facing]);
 
+  // Reset zoom when switching cameras — different lenses, different baseline FOV.
+  useEffect(() => {
+    setZoom(1);
+  }, [facing]);
+
   function snap() {
     const video = videoRef.current;
     if (!video || video.videoWidth === 0) return;
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // Output a square crop centered on what the user sees, then apply digital
+    // zoom by cropping a smaller centered region of the source frame.
+    const side = Math.min(video.videoWidth, video.videoHeight);
+    const sx0 = (video.videoWidth - side) / 2;
+    const sy0 = (video.videoHeight - side) / 2;
+    const z = Math.max(ZMIN, Math.min(ZMAX, zoom));
+    const sw = side / z;
+    const sh = side / z;
+    const sx = sx0 + (side - sw) / 2;
+    const sy = sy0 + (side - sh) / 2;
+    canvas.width = side;
+    canvas.height = side;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     canvas.toBlob(
       (blob) => {
         if (blob) onCapture(blob);
@@ -104,9 +125,17 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
           <X size={20} />
         </button>
         <div className="text-xs uppercase tracking-wide opacity-80">
-          {ZONES.find((z) => z.id === zone)?.label}
+          {ZONES.find((z) => z.id === zone)?.label} · close-up
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowGrid((g) => !g)}
+            aria-label={showGrid ? 'Hide rule-of-thirds grid' : 'Show rule-of-thirds grid'}
+            title="Toggle rule-of-thirds grid"
+            className={`p-2 rounded-full hover:bg-white/10 ${showGrid ? 'text-white' : 'text-white/40'}`}
+          >
+            <Grid3x3 size={18} />
+          </button>
           {ghostUrl && (
             <button
               onClick={() => setGhost((g) => !g)}
@@ -127,60 +156,64 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
         </div>
       </div>
 
-      {/* Viewfinder */}
-      <div className="relative flex-1 overflow-hidden">
-        <video
-          ref={videoRef}
-          playsInline
-          muted
-          className={`absolute inset-0 w-full h-full object-cover ${
-            facing === 'user' ? 'scale-x-[-1]' : ''
-          }`}
-        />
-
-        {/* Ghost overlay: previous photo for this zone, semi-transparent */}
-        {ghostUrl && ghost && (
-          <img
-            src={ghostUrl}
-            alt=""
-            aria-hidden
-            className={`absolute inset-0 w-full h-full object-cover pointer-events-none mix-blend-screen ${
-              facing === 'user' ? 'scale-x-[-1]' : ''
-            }`}
-            style={{ opacity: ghostOpacity }}
+      {/* Viewfinder. We wrap the video in a square area so what the user sees
+          matches what gets captured (square crop, digital zoom applied via
+          CSS scale on the live preview and via canvas crop on snap). */}
+      <div className="relative flex-1 overflow-hidden flex items-center justify-center">
+        <div className="relative aspect-square w-full max-h-full max-w-full overflow-hidden bg-black">
+          <video
+            ref={videoRef}
+            playsInline
+            muted
+            style={{ transform: `${facing === 'user' ? 'scaleX(-1) ' : ''}scale(${zoom})` }}
+            className="absolute inset-0 w-full h-full object-cover origin-center transition-transform"
           />
-        )}
 
-        {!ready && !error && (
-          <div className="absolute inset-0 flex items-center justify-center text-white/80 text-sm">
-            Starting camera…
-          </div>
-        )}
+          {/* Ghost overlay: previous photo for this zone, semi-transparent */}
+          {ghostUrl && ghost && (
+            <img
+              src={ghostUrl}
+              alt=""
+              aria-hidden
+              style={{
+                opacity: ghostOpacity,
+                transform: `${facing === 'user' ? 'scaleX(-1) ' : ''}scale(${zoom})`,
+              }}
+              className="absolute inset-0 w-full h-full object-cover pointer-events-none mix-blend-screen origin-center transition-transform"
+            />
+          )}
 
-        {error && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-white/90 text-sm gap-2 p-4 text-center">
-            <Camera size={28} className="opacity-60" />
-            {error}
-          </div>
-        )}
+          {!ready && !error && (
+            <div className="absolute inset-0 flex items-center justify-center text-white/80 text-sm">
+              Starting camera…
+            </div>
+          )}
 
-        {/* Rule of thirds + zone guide */}
-        <svg
-          className="absolute inset-0 w-full h-full pointer-events-none"
-          viewBox="0 0 100 150"
-          preserveAspectRatio="xMidYMid slice"
-        >
-          {/* Thirds */}
-          <g stroke="white" strokeOpacity="0.35" strokeWidth="0.2" fill="none">
-            <line x1="33.33" y1="0" x2="33.33" y2="150" />
-            <line x1="66.66" y1="0" x2="66.66" y2="150" />
-            <line x1="0" y1="50" x2="100" y2="50" />
-            <line x1="0" y1="100" x2="100" y2="100" />
-          </g>
+          {error && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-white/90 text-sm gap-2 p-4 text-center">
+              <Camera size={28} className="opacity-60" />
+              {error}
+            </div>
+          )}
 
-          {/* Zone-specific guide */}
-          <ZoneGuide zone={zone} />
-        </svg>
+          {/* Optional rule-of-thirds + close-up framing guide */}
+          <svg
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="xMidYMid slice"
+          >
+            {showGrid && (
+              <g stroke="white" strokeOpacity="0.3" strokeWidth="0.2" fill="none">
+                <line x1="33.33" y1="0" x2="33.33" y2="100" />
+                <line x1="66.66" y1="0" x2="66.66" y2="100" />
+                <line x1="0" y1="33.33" x2="100" y2="33.33" />
+                <line x1="0" y1="66.66" x2="100" y2="66.66" />
+              </g>
+            )}
+
+            <CloseUpGuide zone={zone} />
+          </svg>
+        </div>
       </div>
 
       {/* Zone picker */}
@@ -202,8 +235,23 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
         </div>
       </div>
 
-      {/* Capture */}
-      <div className="bg-black flex flex-col items-center justify-center py-4 gap-3">
+      {/* Controls + capture */}
+      <div className="bg-black flex flex-col items-center justify-center py-3 gap-3">
+        <div className="flex items-center gap-2 text-white/80 text-[11px] w-full max-w-xs px-4">
+          <ZoomIn size={14} className="shrink-0" aria-hidden />
+          <input
+            type="range"
+            min={ZMIN * 100}
+            max={ZMAX * 100}
+            step={5}
+            value={Math.round(zoom * 100)}
+            onChange={(e) => setZoom(Number(e.target.value) / 100)}
+            className="flex-1 accent-pink-400"
+            aria-label="Zoom"
+          />
+          <span className="shrink-0 tabular-nums w-10 text-right">{zoom.toFixed(1)}×</span>
+        </div>
+
         {ghostUrl && ghost && (
           <div className="flex items-center gap-2 text-white/80 text-[11px] w-full max-w-xs px-4">
             <span className="shrink-0">Ghost</span>
@@ -232,120 +280,93 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
   );
 }
 
-function ZoneGuide({ zone }: { zone: Zone }) {
-  // One color for the whole overlay so it reads cleanly against any
-  // skin tone / background. Solid white with a faint dark drop-shadow.
+function CloseUpGuide({ zone }: { zone: Zone }) {
+  // Solid white lines with a faint dark drop-shadow so the overlay reads
+  // cleanly on any skin tone or background.
   const C = 'rgba(255,255,255,0.95)';
-  const SW = 0.5;
-  const TEXT_FILL = 'white';
+  const SW = 0.4;
   const SHADOW = 'drop-shadow(0 0 1px rgba(0,0,0,0.7))';
 
-  // Tiny labeled landmark marker.
-  const Marker = ({ cx, cy, label, dx = 0, dy = -2 }: { cx: number; cy: number; label: string; dx?: number; dy?: number }) => (
-    <g>
-      <circle cx={cx} cy={cy} r="1.6" fill={C} />
-      <circle cx={cx} cy={cy} r="3" fill="none" stroke={C} strokeWidth={SW} />
+  // Centered close-up target — small enough that filling it forces the user
+  // to get the camera close to their skin. The shape varies by zone as a
+  // gentle hint about what to fill it with, but they're all small and central.
+  const target = (() => {
+    switch (zone) {
+      case 'full':
+        return <ellipse cx="50" cy="50" rx="22" ry="28" />;
+      case 'leftCheek':
+      case 'rightCheek':
+        return <ellipse cx="50" cy="50" rx="24" ry="22" />;
+      case 'forehead':
+        return <rect x="26" y="34" width="48" height="20" rx="3" />;
+      case 'chin':
+        return <rect x="26" y="46" width="48" height="20" rx="3" />;
+      case 'nose':
+        return <rect x="38" y="28" width="24" height="44" rx="3" />;
+    }
+  })();
+
+  const hint = (() => {
+    switch (zone) {
+      case 'full':
+        return 'Fill the oval with the area you want to track';
+      case 'leftCheek':
+        return 'Fill the oval with your left cheek skin';
+      case 'rightCheek':
+        return 'Fill the oval with your right cheek skin';
+      case 'forehead':
+        return 'Fill the box with your forehead skin';
+      case 'chin':
+        return 'Fill the box with your chin / jawline skin';
+      case 'nose':
+        return 'Fill the box with your nose / T-zone skin';
+    }
+  })();
+
+  return (
+    <g style={{ filter: SHADOW }}>
+      {/* Dim everything outside the target so the close-up area reads as the
+          subject. Uses an SVG mask so the overlay only darkens the surround. */}
+      <defs>
+        <mask id="closeup-mask">
+          <rect x="0" y="0" width="100" height="100" fill="white" />
+          <g fill="black">{target}</g>
+        </mask>
+      </defs>
+      <rect x="0" y="0" width="100" height="100" fill="rgba(0,0,0,0.35)" mask="url(#closeup-mask)" />
+
+      {/* Target outline */}
+      <g fill="none" stroke={C} strokeWidth={SW} strokeDasharray="2 1.5">
+        {target}
+      </g>
+
+      {/* Crosshair so users can tell their subject is centered */}
+      <g stroke={C} strokeWidth={SW} strokeOpacity="0.7">
+        <line x1="48" y1="50" x2="52" y2="50" />
+        <line x1="50" y1="48" x2="50" y2="52" />
+      </g>
+
       <text
-        x={cx + dx}
-        y={cy + dy}
+        x="50"
+        y="92"
         textAnchor="middle"
-        fill={TEXT_FILL}
-        fontSize="3.2"
+        fill="white"
+        fontSize="3.4"
         fontWeight="600"
-        style={{ filter: SHADOW }}
       >
-        {label}
+        {hint}
+      </text>
+      <text
+        x="50"
+        y="97"
+        textAnchor="middle"
+        fill="white"
+        fillOpacity="0.75"
+        fontSize="2.6"
+        fontWeight="500"
+      >
+        Get 4–6 in / 10–15 cm away · zoom in if needed
       </text>
     </g>
   );
-
-  const Caption = ({ children, y = 142 }: { children: string; y?: number }) => (
-    <text
-      x="50"
-      y={y}
-      textAnchor="middle"
-      fill={TEXT_FILL}
-      fontSize="3.6"
-      fontWeight="600"
-      style={{ filter: SHADOW }}
-    >
-      {children}
-    </text>
-  );
-
-  switch (zone) {
-    case 'full':
-      // Big oval — basically as much of the screen as we can without going
-      // off the edges. Eye line at upper third, nose line splits centrally,
-      // chin marker at the bottom of the oval.
-      return (
-        <g fill="none" stroke={C} strokeWidth={SW} strokeDasharray="2 1.5" style={{ filter: SHADOW }}>
-          <ellipse cx="50" cy="72" rx="46" ry="62" />
-          <line x1="50" y1="14" x2="50" y2="130" strokeDasharray="1.5 1" />
-          <line x1="6" y1="60" x2="94" y2="60" strokeDasharray="1.5 1" />
-          <Marker cx={26} cy={60} label="eye" dy={-4.5} />
-          <Marker cx={74} cy={60} label="eye" dy={-4.5} />
-          <Marker cx={50} cy={84} label="nose" dy={-4.5} />
-          <Marker cx={50} cy={130} label="chin" dy={-4.5} />
-          <Caption>Fit your whole face in the oval</Caption>
-        </g>
-      );
-
-    case 'leftCheek':
-      // User turns head ¾ to the right (mirrored selfie shows left side).
-      // Ear sits on the LEFT edge, nose on the right, chin at the bottom.
-      return (
-        <g fill="none" stroke={C} strokeWidth={SW} strokeDasharray="2 1.5" style={{ filter: SHADOW }}>
-          <ellipse cx="55" cy="72" rx="42" ry="58" />
-          <line x1="6" y1="60" x2="94" y2="60" strokeDasharray="1.5 1" />
-          <Marker cx={18} cy={66} label="ear" dy={-4.5} />
-          <Marker cx={78} cy={72} label="nose tip" dy={-4.5} />
-          <Marker cx={62} cy={126} label="chin" dy={-4.5} />
-          <Caption>Turn head ¾ to the right · ear on the left, nose on the right</Caption>
-        </g>
-      );
-
-    case 'rightCheek':
-      // Mirror of leftCheek.
-      return (
-        <g fill="none" stroke={C} strokeWidth={SW} strokeDasharray="2 1.5" style={{ filter: SHADOW }}>
-          <ellipse cx="45" cy="72" rx="42" ry="58" />
-          <line x1="6" y1="60" x2="94" y2="60" strokeDasharray="1.5 1" />
-          <Marker cx={82} cy={66} label="ear" dy={-4.5} />
-          <Marker cx={22} cy={72} label="nose tip" dy={-4.5} />
-          <Marker cx={38} cy={126} label="chin" dy={-4.5} />
-          <Caption>Turn head ¾ to the left · ear on the right, nose on the left</Caption>
-        </g>
-      );
-
-    case 'forehead':
-      return (
-        <g fill="none" stroke={C} strokeWidth={SW} strokeDasharray="2 1.5" style={{ filter: SHADOW }}>
-          <rect x="10" y="30" width="80" height="34" rx="4" />
-          <Marker cx={50} cy={64} label="brow" dy={-4.5} />
-          <Caption>Frame just the forehead</Caption>
-        </g>
-      );
-
-    case 'chin':
-      return (
-        <g fill="none" stroke={C} strokeWidth={SW} strokeDasharray="2 1.5" style={{ filter: SHADOW }}>
-          <rect x="14" y="80" width="72" height="36" rx="4" />
-          <Marker cx={50} cy={80} label="lip line" dy={-4.5} />
-          <Marker cx={50} cy={116} label="chin" dy={-4.5} />
-          <Caption>Frame jawline and chin</Caption>
-        </g>
-      );
-
-    case 'nose':
-      return (
-        <g fill="none" stroke={C} strokeWidth={SW} strokeDasharray="2 1.5" style={{ filter: SHADOW }}>
-          <rect x="28" y="42" width="44" height="58" rx="4" />
-          <line x1="50" y1="42" x2="50" y2="100" strokeDasharray="1.5 1" />
-          <Marker cx={50} cy={50} label="bridge" dy={-4.5} />
-          <Marker cx={50} cy={88} label="tip" dy={-4.5} />
-          <Caption>Center the nose / T-zone</Caption>
-        </g>
-      );
-  }
 }
