@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ExternalLink, Eye, EyeOff, X } from 'lucide-react';
+import { Check, Download, ExternalLink, Eye, EyeOff, Upload, X } from 'lucide-react';
 import {
   getGeminiKey,
   getGeminiModel,
   setGeminiKey,
   setGeminiModel,
 } from '../lib/settings';
+import { exportAll, importAll, suggestedFilename } from '../lib/backup';
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [key, setKey] = useState(getGeminiKey());
@@ -13,6 +14,52 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [show, setShow] = useState(false);
   const [savedAt, setSavedAt] = useState(0);
   const firstRender = useRef(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [backupBusy, setBackupBusy] = useState<'idle' | 'export' | 'import'>('idle');
+  const [backupMsg, setBackupMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  async function handleExport() {
+    setBackupBusy('export');
+    setBackupMsg(null);
+    try {
+      const { blob, summary } = await exportAll();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = suggestedFilename();
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const total = Object.values(summary.counts).reduce((s, n) => s + n, 0);
+      setBackupMsg({
+        kind: 'ok',
+        text: `Saved ${total} rows (${formatBytes(summary.bytes)}).`,
+      });
+    } catch (e) {
+      setBackupMsg({ kind: 'err', text: errMessage(e) });
+    } finally {
+      setBackupBusy('idle');
+    }
+  }
+
+  async function handleImport(file: File) {
+    const ok = window.confirm(
+      'Importing replaces ALL current data on this device with the contents of the file. Continue?',
+    );
+    if (!ok) return;
+    setBackupBusy('import');
+    setBackupMsg(null);
+    try {
+      const summary = await importAll(file);
+      const total = Object.values(summary.counts).reduce((s, n) => s + n, 0);
+      setBackupMsg({ kind: 'ok', text: `Imported ${total} rows.` });
+    } catch (e) {
+      setBackupMsg({ kind: 'err', text: errMessage(e) });
+    } finally {
+      setBackupBusy('idle');
+    }
+  }
 
   // Auto-save with a tiny debounce so each keystroke isn't a write.
   useEffect(() => {
@@ -115,7 +162,74 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             <button className="btn-primary" onClick={onClose}>Done</button>
           </div>
         </section>
+
+        <section className="space-y-2 mt-6 pt-4 border-t border-glow-100">
+          <h4 className="font-display text-base text-glow-800">Backup &amp; restore</h4>
+          <p className="text-xs text-glow-600">
+            All your data lives on this device. Export a single JSON file
+            (photos included) you can save to iCloud Drive, Google Drive, or
+            email-to-self, and import on any device or after clearing site
+            data.
+          </p>
+
+          <div className="flex gap-2 flex-wrap pt-1">
+            <button
+              type="button"
+              className="btn-soft"
+              onClick={handleExport}
+              disabled={backupBusy !== 'idle'}
+            >
+              <Download size={14} />
+              {backupBusy === 'export' ? 'Exporting…' : 'Export to file'}
+            </button>
+            <button
+              type="button"
+              className="btn-soft"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={backupBusy !== 'idle'}
+            >
+              <Upload size={14} />
+              {backupBusy === 'import' ? 'Importing…' : 'Import from file'}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = '';
+                if (f) void handleImport(f);
+              }}
+            />
+          </div>
+
+          {backupMsg && (
+            <p
+              className={`text-[11px] mt-1 ${
+                backupMsg.kind === 'ok' ? 'text-emerald-700' : 'text-red-700'
+              }`}
+            >
+              {backupMsg.text}
+            </p>
+          )}
+          <p className="text-[11px] text-glow-500">
+            Importing replaces everything on this device with the file's
+            contents.
+          </p>
+        </section>
       </div>
     </div>
   );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function errMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  return 'Something went wrong.';
 }
