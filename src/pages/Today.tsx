@@ -677,12 +677,16 @@ function RoutineColumn({
   onAskAi: () => void;
 }) {
   const [adding, setAdding] = useState(false);
-  // Drag handle is isolated on the right edge with `touch-none`, so it doesn't
-  // collide with vertical scrolling. Activate on a small drag distance for
-  // immediate, thumb-friendly reordering (no long-press required).
+  // Reorder is gated behind a long-press: tap = toggle, swipe-left = delete,
+  // long-press on any row puts the column into edit mode where drag handles
+  // appear and rows can be rearranged. This prevents accidental drags while
+  // also keeping swipe-to-delete unambiguous.
+  const [editMode, setEditMode] = useState(false);
+  // Once in edit mode, dnd-kit handles drag from the visible grip handle on
+  // the right; no activation distance needed since the handle is explicit.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { distance: 4 } }),
   );
   const ids = products.map((p) => p.id!);
 
@@ -699,14 +703,24 @@ function RoutineColumn({
     <div className="min-w-0">
       <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-glow-700 mb-2">
         {icon} {label}
-        <button
-          type="button"
-          onClick={onAskAi}
-          className="ml-auto inline-flex items-center gap-1 rounded-full bg-glow-100 text-glow-800 px-2 py-0.5 text-[10px] font-medium hover:bg-glow-200"
-          title="Ask AI for the best layering order"
-        >
-          <Sparkles size={10} /> AI order
-        </button>
+        {editMode ? (
+          <button
+            type="button"
+            onClick={() => setEditMode(false)}
+            className="ml-auto inline-flex items-center gap-1 rounded-full bg-glow-600 text-white px-2 py-0.5 text-[10px] font-medium hover:bg-glow-700"
+          >
+            Done
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onAskAi}
+            className="ml-auto inline-flex items-center gap-1 rounded-full bg-glow-100 text-glow-800 px-2 py-0.5 text-[10px] font-medium hover:bg-glow-200"
+            title="Ask AI for the best layering order"
+          >
+            <Sparkles size={10} /> AI order
+          </button>
+        )}
       </div>
       {products.length === 0 ? (
         <p className="text-xs text-glow-500">No {label.toLowerCase()} products scheduled.</p>
@@ -720,13 +734,21 @@ function RoutineColumn({
                   product={p}
                   done={isDone(p.id!)}
                   adHoc={isAdHoc(p.id!)}
+                  editMode={editMode}
                   onToggle={() => onToggle(p.id!)}
                   onDelete={() => onDelete(p.id!)}
+                  onEnterEditMode={() => setEditMode(true)}
                 />
               ))}
             </ul>
           </SortableContext>
         </DndContext>
+      )}
+
+      {editMode && (
+        <p className="mt-1 text-[11px] text-glow-500 italic">
+          Drag the handles to rearrange · tap Done when finished
+        </p>
       )}
 
       {skipped.length > 0 && (
@@ -802,23 +824,30 @@ function RoutineColumn({
 }
 
 const SWIPE_REVEAL_X = -88;
-const SWIPE_DIRECTION_LOCK_PX = 6;
+const SWIPE_DIRECTION_LOCK_PX = 4;
+const LONG_PRESS_MS = 450;
+const LONG_PRESS_MAX_MOVE = 8;
 
 function SortableRoutineRow({
   product,
   done,
   adHoc,
+  editMode,
   onToggle,
   onDelete,
+  onEnterEditMode,
 }: {
   product: Product;
   done: boolean;
   adHoc: boolean;
+  editMode: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  onEnterEditMode: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: product.id!,
+    disabled: !editMode,
   });
   const liStyle: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -833,9 +862,14 @@ function SortableRoutineRow({
   const [swipeX, setSwipeX] = useState(0);
   // Live drag offset while the finger is down. null when not actively swiping.
   const [dragOffset, setDragOffset] = useState<number | null>(null);
-  const startRef = useRef<{ x: number; y: number; lock: 'none' | 'h' | 'v' } | null>(null);
-  // Set when the gesture committed a horizontal drag, so the trailing click
-  // event from the same pointer interaction can be swallowed.
+  const startRef = useRef<{
+    x: number;
+    y: number;
+    lock: 'none' | 'h' | 'v';
+    longPressTimer: number | null;
+  } | null>(null);
+  // Set when the gesture committed a horizontal drag (or fired a long-press),
+  // so the trailing click from the same pointer interaction is swallowed.
   const swipedRef = useRef(false);
 
   // Drag (dnd-kit reorder) cancels any in-progress swipe state.
@@ -846,11 +880,30 @@ function SortableRoutineRow({
     }
   }, [isDragging]);
 
+  // Leaving edit mode snaps any open swipe closed.
+  useEffect(() => {
+    if (editMode) {
+      setSwipeX(0);
+      setDragOffset(null);
+    }
+  }, [editMode]);
+
+  function cancelLongPress() {
+    const s = startRef.current;
+    if (s && s.longPressTimer != null) {
+      clearTimeout(s.longPressTimer);
+      s.longPressTimer = null;
+    }
+  }
+
   const offset = dragOffset !== null ? dragOffset : swipeX;
   const fgStyle: React.CSSProperties = {
     transform: `translateX(${offset}px)`,
     transition: dragOffset === null ? 'transform 0.2s ease' : 'none',
-    touchAction: 'pan-y',
+    // In edit mode, dnd-kit owns the gesture on its own handle, so the row
+    // body can scroll freely. Otherwise, lock horizontal so the browser
+    // doesn't steal our swipe.
+    touchAction: editMode ? 'auto' : 'pan-y',
   };
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -859,7 +912,26 @@ function SortableRoutineRow({
     // Don't engage when the user starts on the reorder handle or the delete
     // button beneath the row.
     if (target.closest('[data-no-swipe]')) return;
-    startRef.current = { x: e.clientX, y: e.clientY, lock: 'none' };
+
+    // Schedule a long-press → enter edit mode. Cancelled by movement, lift,
+    // or swipe-direction lock.
+    let timer: number | null = null;
+    if (!editMode) {
+      timer = window.setTimeout(() => {
+        onEnterEditMode();
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+          try {
+            navigator.vibrate(15);
+          } catch {
+            /* ignore */
+          }
+        }
+        swipedRef.current = true; // suppress the trailing click
+        const s = startRef.current;
+        if (s) s.longPressTimer = null;
+      }, LONG_PRESS_MS);
+    }
+    startRef.current = { x: e.clientX, y: e.clientY, lock: 'none', longPressTimer: timer };
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
@@ -868,12 +940,24 @@ function SortableRoutineRow({
     const dx = e.clientX - s.x;
     const dy = e.clientY - s.y;
 
+    // Movement past the long-press tolerance cancels the press.
+    if (
+      s.longPressTimer != null &&
+      (Math.abs(dx) > LONG_PRESS_MAX_MOVE || Math.abs(dy) > LONG_PRESS_MAX_MOVE)
+    ) {
+      cancelLongPress();
+    }
+
+    // Reorder mode owns the row; no swipe in edit mode.
+    if (editMode) return;
+
     if (s.lock === 'none') {
       if (Math.abs(dx) < SWIPE_DIRECTION_LOCK_PX && Math.abs(dy) < SWIPE_DIRECTION_LOCK_PX) {
         return;
       }
       if (Math.abs(dx) > Math.abs(dy)) {
         s.lock = 'h';
+        cancelLongPress();
         try {
           e.currentTarget.setPointerCapture(e.pointerId);
         } catch {
@@ -882,6 +966,7 @@ function SortableRoutineRow({
       } else {
         // Vertical scroll wins; bail so the page can pan.
         s.lock = 'v';
+        cancelLongPress();
         startRef.current = null;
         return;
       }
@@ -890,11 +975,13 @@ function SortableRoutineRow({
     if (s.lock === 'h') {
       const next = Math.min(0, Math.max(SWIPE_REVEAL_X * 1.3, swipeX + dx));
       setDragOffset(next);
+      e.preventDefault();
     }
   }
 
   function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
     const s = startRef.current;
+    cancelLongPress();
     if (s?.lock === 'h' && dragOffset !== null) {
       const final = dragOffset < SWIPE_REVEAL_X / 2 ? SWIPE_REVEAL_X : 0;
       setSwipeX(final);
@@ -910,6 +997,7 @@ function SortableRoutineRow({
   }
 
   function onPointerCancel() {
+    cancelLongPress();
     setDragOffset(null);
     startRef.current = null;
   }
@@ -925,6 +1013,11 @@ function SortableRoutineRow({
       // Tap on a revealed row closes it instead of toggling done.
       e.preventDefault();
       setSwipeX(0);
+      return;
+    }
+    if (editMode) {
+      // In edit mode, tap toggles done as usual; reorder is via the handle.
+      onToggle();
       return;
     }
     onToggle();
@@ -957,7 +1050,7 @@ function SortableRoutineRow({
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerCancel}
-          className={`relative w-full flex items-stretch gap-1 rounded-xl border pl-2 pr-1 text-left text-sm ${
+          className={`relative w-full flex items-stretch gap-1 rounded-xl border ${editMode ? 'pl-2 pr-1' : 'pl-2 pr-2'} text-left text-sm select-none ${
             done
               ? 'bg-glow-100 border-glow-300 text-glow-900'
               : 'bg-white border-glow-200 text-glow-800'
@@ -996,15 +1089,17 @@ function SortableRoutineRow({
               )}
             </span>
           </button>
-          <span
-            data-no-swipe
-            {...attributes}
-            {...listeners}
-            aria-label="Drag to reorder"
-            className="flex items-center justify-center shrink-0 self-stretch -mr-1 px-3 text-glow-500 hover:text-glow-800 hover:bg-glow-100 active:bg-glow-200 cursor-grab active:cursor-grabbing touch-none rounded-r-xl"
-          >
-            <GripVertical size={22} />
-          </span>
+          {editMode && (
+            <span
+              data-no-swipe
+              {...attributes}
+              {...listeners}
+              aria-label="Drag to reorder"
+              className="flex items-center justify-center shrink-0 self-stretch -mr-1 px-3 text-glow-500 hover:text-glow-800 hover:bg-glow-100 active:bg-glow-200 cursor-grab active:cursor-grabbing touch-none rounded-r-xl"
+            >
+              <GripVertical size={22} />
+            </span>
+          )}
         </div>
       </div>
     </li>
