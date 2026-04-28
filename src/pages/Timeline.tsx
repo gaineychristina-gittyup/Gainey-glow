@@ -4,15 +4,18 @@ import { useNavigate } from 'react-router-dom';
 import {
   CalendarClock,
   Camera,
+  Check,
   ChevronDown,
   ChevronUp,
   CircleStop,
   FlaskConical,
   Images,
   Lightbulb,
+  Moon,
   Plus,
   Sparkles,
   Star,
+  Sun,
   Trash2,
 } from 'lucide-react';
 import {
@@ -20,9 +23,11 @@ import {
   ZONES,
   TREATMENT_TYPES,
   PRODUCT_STEPS,
+  STEP_CHIP_CLASSES,
   type Comparison,
   type Insight,
   type PhotoEntry,
+  type Product,
   type SkinRating,
   type Treatment,
 } from '../db/schema';
@@ -50,6 +55,11 @@ type Event =
   | { kind: 'skin-rating'; date: string; sortKey: number; rating: SkinRating; sinceTreatment?: SinceTreatment };
 
 type Filter = 'all' | 'photos' | 'products' | 'treatments' | 'comparisons' | 'insights' | 'ratings';
+
+interface DayRegimen {
+  am: Product[];
+  pm: Product[];
+}
 
 const NEW_TREATMENT: Treatment = { type: 'facial', date: todayISO() };
 const newInsight = (): Insight => ({ date: todayISO(), createdAt: Date.now(), text: '' });
@@ -121,6 +131,30 @@ export default function Timeline() {
   const comparisons = useLiveQuery(() => db.comparisons.toArray(), []);
   const insights = useLiveQuery(() => db.insights.toArray(), []);
   const skinRatings = useLiveQuery(() => db.skinRatings.toArray(), []);
+  const routineLogs = useLiveQuery(() => db.routineLogs.toArray(), []);
+
+  const regimenByDate = useMemo(() => {
+    const map = new Map<string, DayRegimen>();
+    if (!routineLogs || !products) return map;
+    const byId = new Map<number, Product>();
+    products.forEach((p) => {
+      if (p.id != null) byId.set(p.id, p);
+    });
+    for (const log of routineLogs) {
+      const product = byId.get(log.productId);
+      if (!product) continue;
+      const entry = map.get(log.date) ?? { am: [], pm: [] };
+      entry[log.period].push(product);
+      map.set(log.date, entry);
+    }
+    const sorter = (a: Product, b: Product) =>
+      (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999);
+    map.forEach((entry) => {
+      entry.am.sort(sorter);
+      entry.pm.sort(sorter);
+    });
+    return map;
+  }, [routineLogs, products]);
   const events: Event[] = useMemo(() => {
     const out: Event[] = [];
     const today = todayISO();
@@ -407,6 +441,7 @@ export default function Timeline() {
         <CalendarView
           months={calendarMonths}
           events={filtered}
+          regimenByDate={regimenByDate}
           onPhoto={setViewing}
           onOpenComparison={setViewingComparison}
           onEditTreatment={setEditingTreatment}
@@ -471,6 +506,7 @@ export default function Timeline() {
         <DayDetailModal
           date={openDate}
           events={events.filter((e) => e.date === openDate)}
+          regimen={regimenByDate.get(openDate)}
           onClose={() => setOpenDate(null)}
           onPhoto={(p) => {
             setOpenDate(null);
@@ -1263,6 +1299,7 @@ function YearDivider({ year }: { year: number }) {
 function CalendarView({
   months,
   events,
+  regimenByDate,
   onPhoto,
   onOpenComparison,
   onEditTreatment,
@@ -1271,6 +1308,7 @@ function CalendarView({
 }: {
   months: 3 | 6;
   events: Event[];
+  regimenByDate: Map<string, DayRegimen>;
   onPhoto: (p: PhotoEntry) => void;
   onOpenComparison: (c: Comparison) => void;
   onEditTreatment: (t: Treatment) => void;
@@ -1310,6 +1348,7 @@ function CalendarView({
             year={mo.y}
             month={mo.m}
             byDate={byDate}
+            regimenByDate={regimenByDate}
             onOpen={setOpenDate}
           />
         ))}
@@ -1328,6 +1367,12 @@ function CalendarView({
               {label}
             </span>
           ))}
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-flex items-center justify-center h-3 min-w-3 rounded-full bg-emerald-500 text-white text-[8px] font-bold leading-none px-0.5">
+              ✓
+            </span>
+            Regimen used
+          </span>
         </div>
       </div>
 
@@ -1335,6 +1380,7 @@ function CalendarView({
         <DayDetailModal
           date={openDate}
           events={byDate.get(openDate) ?? []}
+          regimen={regimenByDate.get(openDate)}
           onClose={() => setOpenDate(null)}
           onPhoto={onPhoto}
           onOpenComparison={onOpenComparison}
@@ -1351,11 +1397,13 @@ function MonthGrid({
   year,
   month,
   byDate,
+  regimenByDate,
   onOpen,
 }: {
   year: number;
   month: number; // 0-11
   byDate: Map<string, Event[]>;
+  regimenByDate: Map<string, DayRegimen>;
   onOpen: (date: string) => void;
 }) {
   const monthName = new Date(year, month, 1).toLocaleDateString(undefined, {
@@ -1385,27 +1433,39 @@ function MonthGrid({
           if (d === null) return <div key={i} className="aspect-square" />;
           const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
           const dayEvents = byDate.get(iso) ?? [];
+          const regimen = regimenByDate.get(iso);
+          const regimenCount = (regimen?.am.length ?? 0) + (regimen?.pm.length ?? 0);
+          const hasContent = dayEvents.length > 0 || regimenCount > 0;
           const isFuture = iso > todayISOStr;
           const isToday = iso === todayISOStr;
-          const ratingBg = '';
           // Distinct event-type dots (max 4 visible)
           const types = Array.from(new Set(dayEvents.map((e) => e.kind)));
           return (
             <button
               key={i}
               type="button"
-              onClick={() => dayEvents.length > 0 && onOpen(iso)}
-              disabled={dayEvents.length === 0}
-              className={`aspect-square rounded-md text-[10px] flex flex-col items-center justify-start p-0.5 ${
-                ratingBg || (dayEvents.length > 0 ? 'bg-glow-50' : 'bg-white/30')
+              onClick={() => hasContent && onOpen(iso)}
+              disabled={!hasContent}
+              className={`relative aspect-square rounded-md text-[10px] flex flex-col items-center justify-start p-0.5 ${
+                hasContent ? 'bg-glow-50' : 'bg-white/30'
               } ${isFuture ? 'opacity-40' : ''} ${
                 isToday ? 'ring-1 ring-glow-500' : ''
-              } ${dayEvents.length > 0 ? 'hover:ring-1 hover:ring-glow-400' : ''}`}
-              aria-label={`${iso} — ${dayEvents.length} event${dayEvents.length === 1 ? '' : 's'}`}
+              } ${hasContent ? 'hover:ring-1 hover:ring-glow-400' : ''}`}
+              aria-label={`${iso} — ${dayEvents.length} event${dayEvents.length === 1 ? '' : 's'}${
+                regimenCount > 0 ? `, ${regimenCount} product${regimenCount === 1 ? '' : 's'} used` : ''
+              }`}
             >
-              <span className={`text-[10px] ${dayEvents.length > 0 ? 'font-semibold text-glow-900' : 'text-glow-600'}`}>
+              <span className={`text-[10px] ${hasContent ? 'font-semibold text-glow-900' : 'text-glow-600'}`}>
                 {d}
               </span>
+              {regimenCount > 0 && (
+                <span
+                  className="absolute top-0.5 right-0.5 inline-flex items-center justify-center h-3 min-w-3 rounded-full bg-emerald-500 text-white text-[8px] font-bold leading-none px-0.5"
+                  title={`${regimenCount} product${regimenCount === 1 ? '' : 's'} used`}
+                >
+                  ✓{regimenCount}
+                </span>
+              )}
               {types.length > 0 && (
                 <div className="mt-auto flex gap-0.5 pb-0.5">
                   {types.slice(0, 4).map((t) => (
@@ -1428,6 +1488,7 @@ function MonthGrid({
 function DayDetailModal({
   date,
   events,
+  regimen,
   onClose,
   onPhoto,
   onOpenComparison,
@@ -1437,6 +1498,7 @@ function DayDetailModal({
 }: {
   date: string;
   events: Event[];
+  regimen?: DayRegimen;
   onClose: () => void;
   onPhoto: (p: PhotoEntry) => void;
   onOpenComparison: (c: Comparison) => void;
@@ -1444,6 +1506,7 @@ function DayDetailModal({
   onEditProduct: (productId: number) => void;
   onEditInsight: (i: Insight) => void;
 }) {
+  const hasRegimen = !!regimen && (regimen.am.length > 0 || regimen.pm.length > 0);
   return (
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/40 p-3">
       <div className="card w-full max-w-md max-h-[85vh] overflow-y-auto">
@@ -1453,43 +1516,118 @@ function DayDetailModal({
             Close
           </button>
         </div>
-        <ul className="space-y-2">
-          {events.map((e, i) => (
-            <li
-              key={i}
-              className="rounded-xl border border-glow-100 p-2"
-            >
-              <div className="flex items-center justify-between mb-1">
-                <Badge kind={e.kind} />
-                {e.kind === 'product-start' || e.kind === 'product-stop' ? (
-                  e.productId ? (
-                    <button
-                      className="text-[11px] text-glow-700 underline"
-                      onClick={() => onEditProduct(e.productId!)}
-                    >
-                      Edit product
-                    </button>
-                  ) : null
-                ) : null}
-              </div>
-              <Body
-                event={e}
-                compact={false}
-                onPhoto={onPhoto}
-                onEditTreatment={onEditTreatment}
-                onOpenComparison={onOpenComparison}
-                onPickPhoto={() => {}}
-                pickedIds={[]}
-                onEditProduct={onEditProduct}
-                onEditInsight={onEditInsight}
-              />
-            </li>
-          ))}
-        </ul>
+        {hasRegimen && (
+          <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5">
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-800 px-2.5 py-1 text-xs font-medium">
+                <Check size={12} /> Regimen used
+              </span>
+            </div>
+            <RegimenList
+              period="am"
+              products={regimen!.am}
+              onEditProduct={onEditProduct}
+            />
+            <RegimenList
+              period="pm"
+              products={regimen!.pm}
+              onEditProduct={onEditProduct}
+            />
+          </div>
+        )}
+        {events.length === 0 && !hasRegimen ? (
+          <p className="text-sm text-glow-600/80">Nothing logged on this day.</p>
+        ) : (
+          <ul className="space-y-2">
+            {events.map((e, i) => (
+              <li
+                key={i}
+                className="rounded-xl border border-glow-100 p-2"
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <Badge kind={e.kind} />
+                  {e.kind === 'product-start' || e.kind === 'product-stop' ? (
+                    e.productId ? (
+                      <button
+                        className="text-[11px] text-glow-700 underline"
+                        onClick={() => onEditProduct(e.productId!)}
+                      >
+                        Edit product
+                      </button>
+                    ) : null
+                  ) : null}
+                </div>
+                <Body
+                  event={e}
+                  compact={false}
+                  onPhoto={onPhoto}
+                  onEditTreatment={onEditTreatment}
+                  onOpenComparison={onOpenComparison}
+                  onPickPhoto={() => {}}
+                  pickedIds={[]}
+                  onEditProduct={onEditProduct}
+                  onEditInsight={onEditInsight}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="mt-3 flex justify-end">
           <button className="btn-primary" onClick={onClose}>Close</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function RegimenList({
+  period,
+  products,
+  onEditProduct,
+}: {
+  period: 'am' | 'pm';
+  products: Product[];
+  onEditProduct: (productId: number) => void;
+}) {
+  if (products.length === 0) return null;
+  const Icon = period === 'am' ? Sun : Moon;
+  const iconCls = period === 'am' ? 'text-amber-500' : 'text-indigo-500';
+  return (
+    <div className="mb-1 last:mb-0">
+      <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-900 mb-1">
+        <Icon size={12} className={iconCls} /> {period.toUpperCase()}
+        <span className="text-emerald-700/70 font-medium normal-case">
+          · {products.length}
+        </span>
+      </div>
+      <ul className="space-y-1">
+        {products.map((p) => {
+          const stepLabel =
+            PRODUCT_STEPS.find((s) => s.id === p.step)?.label ?? p.step;
+          return (
+            <li key={p.id}>
+              <button
+                type="button"
+                onClick={() => p.id != null && onEditProduct(p.id)}
+                className="w-full flex items-center gap-2 text-left rounded-lg bg-white/80 hover:bg-white px-2 py-1.5"
+              >
+                <span
+                  className={`shrink-0 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-medium w-20 truncate ${STEP_CHIP_CLASSES[p.step]}`}
+                  title={stepLabel}
+                >
+                  {stepLabel}
+                </span>
+                <span className="flex-1 min-w-0 truncate text-sm text-glow-900">
+                  {p.brand && (
+                    <span className="font-bold text-glow-900">{p.brand} </span>
+                  )}
+                  <span className="font-medium">{p.name}</span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
