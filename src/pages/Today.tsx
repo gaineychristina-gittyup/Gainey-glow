@@ -28,6 +28,7 @@ import PhotoThumb from '../components/PhotoThumb';
 import CameraCapture from '../components/CameraCapture';
 import UploadReviewModal from '../components/UploadReviewModal';
 import PhotoViewer from '../components/PhotoViewer';
+import SkinAssessmentModal from '../components/SkinAssessmentModal';
 
 interface UploadSummary {
   count: number;
@@ -52,6 +53,14 @@ export default function Today() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [reviewFiles, setReviewFiles] = useState<File[] | null>(null);
   const [viewing, setViewing] = useState<PhotoEntry | null>(null);
+  // Camera session state: shots taken since the camera was opened. Tracked
+  // in a ref so the close handler can read the latest list without state
+  // closure issues, and mirrored into a count for the in-camera badge.
+  const sessionShotsRef = useRef<PhotoEntry[]>([]);
+  const [sessionCount, setSessionCount] = useState(0);
+  // Assessment queue: when the camera closes, every saved shot from the
+  // session gets an assessment modal in turn (one at a time).
+  const [assessQueue, setAssessQueue] = useState<PhotoEntry[]>([]);
   const uploadRef = useRef<HTMLInputElement>(null);
 
   const photosToday = useLiveQuery(
@@ -86,29 +95,62 @@ export default function Today() {
     return all.slice(0, 3);
   }, []);
 
-  // Live capture from the in-app camera — uses selected date and zone.
+  // Live capture from the in-app camera — uses selected date and zone. The
+  // camera stays open after a snap so the user can switch zones and keep
+  // shooting in one session. Closing the camera flushes the session: shows
+  // a single summary toast and queues an AI assessment per photo if a
+  // Gemini key is configured.
   async function handleCameraSnap(blob: Blob) {
     setBusy(true);
     setSummary(null);
     try {
       const compressed = await compressForStorage(blob);
       const { thumb } = await makeThumbnail(compressed.blob, 480);
-      await db.photos.add({
+      const takenAt = Date.now();
+      const trimmedNotes = notes.trim() || undefined;
+      const id = await db.photos.add({
         date,
-        takenAt: Date.now(),
+        takenAt,
         zone,
         blob: compressed.blob,
         thumb,
         width: compressed.width,
         height: compressed.height,
-        notes: notes.trim() || undefined,
+        notes: trimmedNotes,
       });
       void requestPersistentStorage();
-      setNotes('');
-      setSummary({ count: 1, withExif: 0, earliest: date, latest: date });
+      const saved: PhotoEntry = {
+        id,
+        date,
+        takenAt,
+        zone,
+        blob: compressed.blob,
+        thumb,
+        width: compressed.width,
+        height: compressed.height,
+        notes: trimmedNotes,
+      };
+      sessionShotsRef.current = [...sessionShotsRef.current, saved];
+      setSessionCount(sessionShotsRef.current.length);
     } finally {
       setBusy(false);
-      setCameraOpen(false);
+    }
+  }
+
+  function handleCameraClose() {
+    setCameraOpen(false);
+    const shots = sessionShotsRef.current;
+    sessionShotsRef.current = [];
+    setSessionCount(0);
+    if (shots.length > 0) {
+      setNotes('');
+      setSummary({
+        count: shots.length,
+        withExif: 0,
+        earliest: date,
+        latest: date,
+      });
+      if (getGeminiKey()) setAssessQueue(shots);
     }
   }
 
@@ -222,7 +264,9 @@ export default function Today() {
           zone={zone}
           onZoneChange={setZone}
           onCapture={handleCameraSnap}
-          onClose={() => setCameraOpen(false)}
+          onClose={handleCameraClose}
+          saving={busy}
+          sessionCount={sessionCount}
         />
       )}
 
@@ -239,6 +283,14 @@ export default function Today() {
       )}
 
       {viewing && <PhotoViewer photo={viewing} onClose={() => setViewing(null)} />}
+
+      {assessQueue[0] && (
+        <SkinAssessmentModal
+          key={assessQueue[0].id}
+          photo={assessQueue[0]}
+          onClose={() => setAssessQueue((q) => q.slice(1))}
+        />
+      )}
 
       <SkinRatingCard date={date} />
 

@@ -18,6 +18,7 @@ const TABLES = [
   'comparisons',
   'skinRatings',
   'insights',
+  'skinAssessments',
 ] as const;
 
 type TableName = (typeof TABLES)[number];

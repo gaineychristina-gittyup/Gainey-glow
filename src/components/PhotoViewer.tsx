@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Calendar, Trash2, X } from 'lucide-react';
+import { Calendar, Sparkles, Trash2, X } from 'lucide-react';
 import { db, ZONES, type PhotoEntry, type Zone } from '../db/schema';
 import { fmtDate } from '../lib/date';
+import SkinAssessmentModal from './SkinAssessmentModal';
 
 export default function PhotoViewer({
   photo: initialPhoto,
@@ -23,6 +24,15 @@ export default function PhotoViewer({
   const [src, setSrc] = useState<string>();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [assessing, setAssessing] = useState(false);
+
+  const assessment = useLiveQuery(
+    () =>
+      photo.id == null
+        ? undefined
+        : db.skinAssessments.where('photoId').equals(photo.id).first(),
+    [photo.id],
+  );
 
   // Build the object URL from the prop's blob — that reference is stable for
   // the lifetime of the viewer. The live query returns a fresh Blob instance
@@ -61,6 +71,11 @@ export default function PhotoViewer({
     setBusy(true);
     try {
       await db.photos.delete(photo.id);
+      const linked = await db.skinAssessments
+        .where('photoId')
+        .equals(photo.id)
+        .first();
+      if (linked?.id) await db.skinAssessments.delete(linked.id);
       onClose();
     } finally {
       setBusy(false);
@@ -135,7 +150,17 @@ export default function PhotoViewer({
         </div>
       </div>
 
-      <div className="bg-black flex items-center justify-end px-3 py-3 gap-2">
+      <div className="bg-black flex items-center justify-end px-3 py-3 gap-2 flex-wrap">
+        {!confirming && (
+          <button
+            type="button"
+            onClick={() => setAssessing(true)}
+            disabled={busy}
+            className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium bg-white/15 text-white hover:bg-white/25 mr-auto"
+          >
+            <Sparkles size={16} /> {assessment ? 'View AI assessment' : 'AI assessment'}
+          </button>
+        )}
         {confirming ? (
           <>
             <span className="text-xs text-white/80 mr-2">Delete this photo?</span>
@@ -164,6 +189,10 @@ export default function PhotoViewer({
           </button>
         )}
       </div>
+
+      {assessing && (
+        <SkinAssessmentModal photo={photo} onClose={() => setAssessing(false)} />
+      )}
     </div>
   );
 }
