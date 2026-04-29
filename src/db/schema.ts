@@ -273,6 +273,30 @@ export interface Insight {
   text: string;
 }
 
+export type AssessmentSeverity = 'mild' | 'moderate' | 'pronounced';
+
+export interface AssessmentObservation {
+  label: string;                // e.g. "Forehead redness"
+  severity: AssessmentSeverity;
+  note?: string;                // 1 short sentence
+}
+
+// AI-generated read of the skin in a single photo. One row per photo (the
+// photoId index is unique). Stored locally so the user can see what Gemini
+// saw the day they snapped the picture without re-running the request.
+export interface SkinAssessment {
+  id?: number;
+  photoId: number;
+  date: string;                 // ISO — denormalized from the photo for sorting
+  createdAt: number;
+  zone: Zone;
+  model: string;                // which Gemini model produced it
+  overall: string;              // 1–2 sentence summary
+  observations: AssessmentObservation[];
+  positives: string[];
+  suggestions: string[];
+}
+
 class GaineyGlowDB extends Dexie {
   photos!: Table<PhotoEntry, number>;
   products!: Table<Product, number>;
@@ -285,6 +309,7 @@ class GaineyGlowDB extends Dexie {
   skinRatings!: Table<SkinRating, number>;
   insights!: Table<Insight, number>;
   routineSkips!: Table<RoutineSkip, number>;
+  skinAssessments!: Table<SkinAssessment, number>;
 
   constructor() {
     super('gainey-glow');
@@ -312,6 +337,9 @@ class GaineyGlowDB extends Dexie {
     });
     this.version(7).stores({
       routineSkips: '++id, date, [date+productId+period]',
+    });
+    this.version(8).stores({
+      skinAssessments: '++id, &photoId, date, createdAt',
     });
   }
 }

@@ -28,6 +28,7 @@ import PhotoThumb from '../components/PhotoThumb';
 import CameraCapture from '../components/CameraCapture';
 import UploadReviewModal from '../components/UploadReviewModal';
 import PhotoViewer from '../components/PhotoViewer';
+import SkinAssessmentModal from '../components/SkinAssessmentModal';
 
 interface UploadSummary {
   count: number;
@@ -52,6 +53,7 @@ export default function Today() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [reviewFiles, setReviewFiles] = useState<File[] | null>(null);
   const [viewing, setViewing] = useState<PhotoEntry | null>(null);
+  const [assessing, setAssessing] = useState<PhotoEntry | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
 
   const photosToday = useLiveQuery(
@@ -87,15 +89,18 @@ export default function Today() {
   }, []);
 
   // Live capture from the in-app camera — uses selected date and zone.
+  // After save, automatically opens the AI assessment modal when the user
+  // has a Gemini key configured.
   async function handleCameraSnap(blob: Blob) {
     setBusy(true);
     setSummary(null);
     try {
       const compressed = await compressForStorage(blob);
       const { thumb } = await makeThumbnail(compressed.blob, 480);
-      await db.photos.add({
+      const takenAt = Date.now();
+      const id = await db.photos.add({
         date,
-        takenAt: Date.now(),
+        takenAt,
         zone,
         blob: compressed.blob,
         thumb,
@@ -106,6 +111,18 @@ export default function Today() {
       void requestPersistentStorage();
       setNotes('');
       setSummary({ count: 1, withExif: 0, earliest: date, latest: date });
+      if (getGeminiKey()) {
+        setAssessing({
+          id,
+          date,
+          takenAt,
+          zone,
+          blob: compressed.blob,
+          thumb,
+          width: compressed.width,
+          height: compressed.height,
+        });
+      }
     } finally {
       setBusy(false);
       setCameraOpen(false);
@@ -239,6 +256,13 @@ export default function Today() {
       )}
 
       {viewing && <PhotoViewer photo={viewing} onClose={() => setViewing(null)} />}
+
+      {assessing && (
+        <SkinAssessmentModal
+          photo={assessing}
+          onClose={() => setAssessing(null)}
+        />
+      )}
 
       <SkinRatingCard date={date} />
 

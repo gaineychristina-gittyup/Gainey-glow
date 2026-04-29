@@ -1,7 +1,16 @@
 // Gemini vision client for product recognition. Uses the user's own API
 // key (stored locally) and the structured-output mode of generateContent.
 
-import { CONCERNS, PRODUCT_STEPS, ZONES, type Concern, type ProductStep, type Zone } from '../db/schema';
+import {
+  CONCERNS,
+  PRODUCT_STEPS,
+  ZONES,
+  type AssessmentObservation,
+  type AssessmentSeverity,
+  type Concern,
+  type ProductStep,
+  type Zone,
+} from '../db/schema';
 import { getGeminiKey, getGeminiModel } from './settings';
 
 export interface ScannedProduct {
@@ -663,4 +672,168 @@ Answer the user's question directly and concretely. Use their routine context ab
   const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('Gemini returned no answer.');
   return text.trim();
+}
+
+// ----- Skin assessment from a photo ----------------------------------------
+
+export interface SkinAssessmentResult {
+  overall: string;
+  observations: AssessmentObservation[];
+  positives: string[];
+  suggestions: string[];
+}
+
+const ASSESSMENT_SCHEMA = {
+  type: 'object',
+  properties: {
+    overall: { type: 'string' },
+    observations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          label: { type: 'string' },
+          severity: { type: 'string', enum: ['mild', 'moderate', 'pronounced'] },
+          note: { type: 'string' },
+        },
+        required: ['label', 'severity'],
+      },
+    },
+    positives: { type: 'array', items: { type: 'string' } },
+    suggestions: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['overall', 'observations', 'positives', 'suggestions'],
+};
+
+function severity(v: unknown): AssessmentSeverity {
+  return v === 'moderate' || v === 'pronounced' ? v : 'mild';
+}
+
+export async function assessSkinFromImage(opts: {
+  image: Blob;
+  zone: Zone;
+  concerns?: string[];        // user's tracked concerns, for context
+  sensitivities?: string[];   // ingredients to avoid in suggestions
+}): Promise<SkinAssessmentResult> {
+  const key = getGeminiKey();
+  if (!key) throw new Error('No Gemini API key set. Add one in Settings.');
+  const model = getGeminiModel();
+  const { data, mime } = await blobToBase64(opts.image);
+  const zoneLabel = ZONES.find((z) => z.id === opts.zone)?.label ?? opts.zone;
+
+  const prompt = `You are an experienced, level-headed skincare assistant
+looking at a single photo from a personal skincare journal.
+
+Photo zone: ${zoneLabel}.
+${opts.concerns && opts.concerns.length
+  ? `The user is actively tracking these concerns: ${opts.concerns.join(', ')}.`
+  : ''}
+${opts.sensitivities && opts.sensitivities.length
+  ? `Avoid suggesting anything containing: ${opts.sensitivities.join(', ')}.`
+  : ''}
+
+Look at the photo and report what you see. Focus on visible skin signs only —
+texture, tone, redness, dryness, oiliness, breakouts, pigmentation, lines,
+puffiness, etc. Do NOT diagnose medical conditions. Do NOT comment on
+identity, attractiveness, weight, or anything outside the skin.
+
+Return:
+- overall: 1–2 plain sentences summarizing how the skin looks today.
+- observations: up to 5 specific things you can see. Each item:
+    - label: short noun phrase (e.g. "Mild forehead shine", "Two cheek
+      papules", "Slight under-eye puffiness")
+    - severity: one of "mild", "moderate", "pronounced"
+    - note: optional one short sentence with extra context.
+  Only include things actually visible. Empty array is fine.
+- positives: 1–3 things looking good (e.g. "Even skin tone across cheeks").
+- suggestions: 1–3 gentle, non-medical care suggestions tied to what you saw
+  (e.g. "Add a fragrance-free moisturizer to the chin"). Reference
+  ingredients first, products only as examples.
+
+Plain text in every field — no markdown. This is informational, not medical
+advice.`;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model,
+  )}:generateContent?key=${encodeURIComponent(key)}`;
+
+  const body = {
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { inline_data: { mime_type: mime, data } },
+          { text: prompt },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: ASSESSMENT_SCHEMA,
+      temperature: 0.3,
+    },
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = `Gemini request failed (${res.status})`;
+    try {
+      const j = JSON.parse(text);
+      if (j?.error?.message) msg = j.error.message;
+    } catch {
+      // keep default
+    }
+    if (res.status === 400 && /api key/i.test(msg)) msg = 'API key not valid. Check it in Settings.';
+    else if (res.status === 429) msg = 'Gemini rate limit reached. Wait a minute and try again.';
+    else if (res.status === 403) msg = `${msg} (Make sure the Generative Language API is enabled for this key.)`;
+    throw new Error(msg);
+  }
+
+  const json = await res.json();
+  const candidate = json?.candidates?.[0];
+  const finishReason: string | undefined = candidate?.finishReason;
+  const text: string | undefined = candidate?.content?.parts?.[0]?.text;
+  if (!text) {
+    if (finishReason === 'SAFETY') {
+      throw new Error('Gemini blocked the response (safety filter). Try a different photo.');
+    }
+    throw new Error(`Gemini returned no assessment${finishReason ? ` (${finishReason})` : ''}.`);
+  }
+
+  let parsed: Partial<SkinAssessmentResult> & {
+    observations?: Partial<AssessmentObservation>[];
+  };
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('Could not parse Gemini response as JSON.');
+  }
+
+  const observations: AssessmentObservation[] = Array.isArray(parsed.observations)
+    ? parsed.observations
+        .map((o) => ({
+          label: String(o?.label ?? '').trim(),
+          severity: severity(o?.severity),
+          note: o?.note ? String(o.note).trim() : undefined,
+        }))
+        .filter((o) => o.label)
+        .slice(0, 5)
+    : [];
+
+  return {
+    overall: String(parsed.overall ?? '').trim(),
+    observations,
+    positives: Array.isArray(parsed.positives)
+      ? parsed.positives.map((s) => String(s).trim()).filter(Boolean).slice(0, 3)
+      : [],
+    suggestions: Array.isArray(parsed.suggestions)
+      ? parsed.suggestions.map((s) => String(s).trim()).filter(Boolean).slice(0, 3)
+      : [],
+  };
 }
