@@ -1,9 +1,11 @@
 // Full-screen in-app camera with a rule-of-thirds grid and zone-specific
-// framing guides. Lets the user line up the same shot every day.
+// framing guides. Lets the user line up the same shot every day. Stays open
+// across multiple captures so the user can shoot several zones in one
+// session — the parent flushes the saved photos when the camera is closed.
 
 import { useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Camera, Eye, EyeOff, RefreshCcw, X } from 'lucide-react';
+import { Camera, Check, Eye, EyeOff, Loader2, RefreshCcw, X } from 'lucide-react';
 import { db, ZONES, type Zone } from '../db/schema';
 
 interface Props {
@@ -11,9 +13,23 @@ interface Props {
   onZoneChange: (z: Zone) => void;
   onCapture: (blob: Blob) => void;
   onClose: () => void;
+  // True while the parent is persisting the most recent capture. Drives the
+  // shutter disabled state and the "Saved ✓" toast on the trailing edge.
+  saving?: boolean;
+  // Number of photos already saved in this camera session (resets when the
+  // camera is closed). Surfaced in the top bar so the user has feedback that
+  // each shot landed.
+  sessionCount?: number;
 }
 
-export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }: Props) {
+export default function CameraCapture({
+  zone,
+  onZoneChange,
+  onCapture,
+  onClose,
+  saving = false,
+  sessionCount = 0,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const [error, setError] = useState<string | null>(null);
@@ -21,6 +37,20 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
   const [ghost, setGhost] = useState(true);
   const [ghostOpacity, setGhostOpacity] = useState(0.4);
   const [ghostUrl, setGhostUrl] = useState<string | null>(null);
+  // Brief white flash when the shutter fires.
+  const [flash, setFlash] = useState(false);
+  // "Saved ✓" toast shown when the parent's saving prop transitions
+  // true → false (i.e. the most recent capture finished persisting).
+  const [savedToast, setSavedToast] = useState(false);
+  const prevSaving = useRef(false);
+  useEffect(() => {
+    if (prevSaving.current && !saving) {
+      setSavedToast(true);
+      const t = window.setTimeout(() => setSavedToast(false), 1200);
+      return () => window.clearTimeout(t);
+    }
+    prevSaving.current = saving;
+  }, [saving]);
 
   // Most recent photo for the selected zone, used as a "ghost" overlay so
   // the user can frame the shot the same way every day.
@@ -83,6 +113,8 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    setFlash(true);
+    window.setTimeout(() => setFlash(false), 220);
     canvas.toBlob(
       (blob) => {
         if (blob) onCapture(blob);
@@ -103,8 +135,18 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
         >
           <X size={20} />
         </button>
-        <div className="text-xs uppercase tracking-wide opacity-80">
-          {ZONES.find((z) => z.id === zone)?.label}
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="text-xs uppercase tracking-wide opacity-80 truncate">
+            {ZONES.find((z) => z.id === zone)?.label}
+          </div>
+          {sessionCount > 0 && (
+            <span
+              className="shrink-0 inline-flex items-center gap-1 rounded-full bg-emerald-500/90 text-white text-[10px] font-semibold px-2 py-0.5"
+              aria-label={`${sessionCount} photo${sessionCount === 1 ? '' : 's'} saved this session`}
+            >
+              <Check size={10} /> {sessionCount}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           {ghostUrl && (
@@ -181,6 +223,20 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
           {/* Zone-specific guide */}
           <ZoneGuide zone={zone} />
         </svg>
+
+        {/* Shutter flash */}
+        <div
+          className="absolute inset-0 bg-white pointer-events-none transition-opacity"
+          style={{ opacity: flash ? 0.55 : 0, transitionDuration: flash ? '60ms' : '220ms' }}
+          aria-hidden
+        />
+
+        {/* Saved toast (after parent finishes persisting) */}
+        {savedToast && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/95 text-white px-3 py-1 text-xs font-semibold shadow-lg pointer-events-none">
+            <Check size={12} /> Saved
+          </div>
+        )}
       </div>
 
       {/* Zone picker */}
@@ -224,9 +280,18 @@ export default function CameraCapture({ zone, onZoneChange, onCapture, onClose }
         <button
           onClick={snap}
           aria-label="Capture"
-          disabled={!ready || !!error}
-          className="h-16 w-16 rounded-full bg-white border-4 border-white/40 active:scale-95 transition disabled:opacity-40"
-        />
+          disabled={!ready || !!error || saving}
+          className="relative h-16 w-16 rounded-full bg-white border-4 border-white/40 active:scale-95 transition disabled:opacity-40 flex items-center justify-center"
+        >
+          {saving && <Loader2 size={22} className="text-glow-700 animate-spin" />}
+        </button>
+        <p className="text-[11px] text-white/60 -mt-1">
+          {saving
+            ? 'Saving last shot…'
+            : sessionCount > 0
+              ? 'Switch zones and snap again, or close when done.'
+              : 'Camera stays open — keep snapping different zones.'}
+        </p>
       </div>
     </div>
   );
