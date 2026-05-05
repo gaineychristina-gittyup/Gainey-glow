@@ -34,12 +34,19 @@ export default function SkinAssessmentModal({
   const photoId = photo.id;
 
   // If we already assessed this photo before, surface the saved version
-  // instead of re-running the API call.
-  const saved = useLiveQuery(
-    () =>
-      photoId == null
-        ? undefined
-        : db.skinAssessments.where('photoId').equals(photoId).first(),
+  // instead of re-running the API call. Coerce "no matching row" to null so
+  // the effect below can tell loading (undefined) from absent (null) — Dexie's
+  // .first() resolves to undefined when nothing matches, which would otherwise
+  // be indistinguishable from useLiveQuery's pre-resolution state.
+  const saved = useLiveQuery<SkinAssessment | null>(
+    async () => {
+      if (photoId == null) return null;
+      const row = await db.skinAssessments
+        .where('photoId')
+        .equals(photoId)
+        .first();
+      return row ?? null;
+    },
     [photoId],
   );
 
